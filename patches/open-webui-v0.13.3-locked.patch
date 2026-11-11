@@ -1,0 +1,14 @@
+diff --git a/backend/open_webui/main.py b/backend/open_webui/main.py
+index 29f5855..e2c76bd 100644
+--- a/backend/open_webui/main.py
++++ b/backend/open_webui/main.py
+@@ -3267,3 +3267,9 @@ if os.path.exists(FRONTEND_BUILD_DIR):
+     )
+ else:
+     log.warning(f"Frontend build directory not found at '{FRONTEND_BUILD_DIR}'. Serving API only.")
++
++# Architecture-proof build: outermost gate denies unproved HTTP and WebSocket paths.
++# No environment flag can disable enforcement. Provide ai_firewall on PYTHONPATH.
++from ai_firewall.ingress import ProtectedIngress
++
++app = ProtectedIngress(app)

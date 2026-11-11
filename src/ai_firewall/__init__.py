@@ -1,0 +1,1 @@
+"""Fail-closed architecture proof; not a production DLP implementation."""
