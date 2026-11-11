@@ -10,6 +10,8 @@ services:
       ADMISSION_KEY: ${ADMISSION_KEY:?required}
       NATIVE_GATEWAY_KEY: ${STORE_KEY:?required}
       NATIVE_GATEWAY_URL: http://gateway:8000
+      NATIVE_LLM_URL: http://litellm:4000
+      LITELLM_KEY: ${LITELLM_KEY:?required}
       ENABLE_SIGNUP: 'true'
       ENABLE_LOGIN_FORM: 'true'
       DEFAULT_USER_ROLE: pending
@@ -47,6 +49,23 @@ services:
       VAULT_KEY: ${VAULT_KEY:?required}
     volumes: [native-vault-data:/data]
     networks: [inspection]
+  mock:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.services
+    environment:
+      SERVICE: mock
+      MOCK_KEY: ${MOCK_KEY:?required}
+      TEST_KEY: ${TEST_KEY:?required}
+    networks: [model]
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.81.3-stable@sha256:3d80908e35230a0dfb58051ae4e2847371b2a327b44e105e79b8c4f67a65596c
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      MOCK_KEY: ${MOCK_KEY:?required}
+      LITELLM_KEY: ${LITELLM_KEY:?required}
+    volumes: [./docker/litellm.yaml:/app/config.yaml:ro]
+    networks: [inspection, model]
   browser-tests:
     build:
       context: .
@@ -58,6 +77,7 @@ services:
 networks:
   edge: {}
   inspection: {internal: true}
+  model: {internal: true}
 volumes:
   native-webui-data:
   native-vault-data:

@@ -12,7 +12,7 @@ import sqlite3
 
 from fastapi import HTTPException
 
-from ai_firewall.native_permit import consume
+from ai_firewall.native_permit import consume, initialize
 
 _permit = ContextVar('native_writer_permit', default=None)
 TABLES = frozenset({'chat', 'chat_message'})
@@ -110,7 +110,11 @@ def guard_flush(session, flush_context, instances):
                     raise sqlite3.IntegrityError('native_nonce_conflict') from None
                 raise
 
-    consume(TransactionConnection(), permit['admission'], permit['token'], payload,
+    transaction = TransactionConnection()
+    # DDL participates in the already-open content transaction. This also
+    # provisions a fresh database without a race-prone startup-only check.
+    initialize(transaction)
+    consume(transaction, permit['admission'], permit['token'], payload,
             payload['user'], payload['operation'], permit['revision'])
     permit['consumed'] = True
 

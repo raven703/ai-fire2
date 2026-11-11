@@ -1,3 +1,42 @@
+# Native append/completion verification — November 11, 2026
+
+Added non-public `ai_firewall.native_lifecycle` server operations. Append takes
+SQLite BEGIN IMMEDIATE before ownership and revision reads, validates the
+parent/current tip, checks its ChatMessage mirror, rejects reused message IDs,
+inspects content, then commits Chat JSON, ChatMessage and the exact-row permit
+nonce together. Assistant content uses output inspection. Canonical results
+are returned only after commit. No HTTP endpoint or events added.
+
+Nonce table initialization now occurs inside the real write transaction before
+consumption. The disposable verification no longer provisions that table.
+Existing standalone replay/rollback tests remain in the regression suite;
+replay against the actual native ORM create path is still not covered.
+
+Added a nonstream completion helper that reconstructs the committed parent
+chain (bounded, cycle checked), inspects all model-bound content, calls native
+LiteLLM -> Mock LLM, and routes the full assistant output through output DLP
+and locked append. Model/provider failures return generic errors; they do not
+remove previously committed clean input. Completion is NOT wired into the
+upstream HTTP lifecycle or Chat.svelte yet.
+
+Executed the extended disposable real-model script with live Gateway/Vault
+and newly started separate native LiteLLM/Mock services: create MASK,
+assistant MASK, user continuation MASK, stale revision denial, foreign-user
+denial, actual LiteLLM completion persisted, BLOCK append denial, create
+BLOCK/outage rollback, and SQLite dump checks for the three raw canaries all
+passed. The complete sequence persisted four ChatMessage rows and four nonces.
+This is a server-helper integration test, NOT original-UI E2E. No claim that
+the Mock request capture was inspected or output detector failure injected.
+
+Final regression run with fork mounted: 84 passed, 1 skipped, one existing
+deprecation warning. Python compilation and diff checks passed. Earlier run
+without the fork mount had seven additional skips and was not the final run.
+
+Still unresolved: direct SQL bypass protection, lifecycle HTTP wiring,
+Chat.svelte canonical synchronization, Chromium chat/history/failure tests,
+event/log/browser-storage sweeps. Native content API and WebSocket remain
+closed. Changes are not deployed into the running native webui. POC untouched.
+
 # Atomic native creation verification — November 11, 2026
 
 Implemented initial Chat + ChatMessage staging and one commit in upstream

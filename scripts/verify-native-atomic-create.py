@@ -15,6 +15,7 @@ from open_webui.models.chat_messages import ChatMessage
 from ai_firewall.native_permit import initialize
 from ai_firewall.native_writer import install
 from ai_firewall.native_client import NativeInspector, revision
+from ai_firewall.native_lifecycle import append_message, complete_chat
 
 
 async def main():
@@ -32,7 +33,7 @@ async def main():
             await connection.run_sync(lambda sync: models.Chat.__table__.create(sync))
             await connection.run_sync(lambda sync: ChatMessage.__table__.create(sync))
         db = sqlite3.connect(path)
-        initialize(db)
+        # No test-side nonce provisioning: production flush must initialize it.
         db.commit()
         db.close()
         sessions = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
@@ -56,11 +57,41 @@ async def main():
         result = await models.Chats.insert_new_chat(cid, uid, form(raw))
         assert result.id == cid
         assert raw not in str(result.chat)
+        aid = str(uuid.uuid4())
+        initial_revision = revision(result.chat)
+        appended = await append_message(sessions, inspector, uid, cid, initial_revision,
+                                        aid, mid, 'SYNTHETIC_PII_ASSISTANT_APPEND', role='assistant')
+        assert 'SYNTHETIC_PII_ASSISTANT_APPEND' not in str(appended.chat)
+        for owner, rev, expected_status in (
+            (uid, initial_revision, 409),
+            (str(uuid.uuid4()), revision(appended.chat), 404),
+        ):
+            try:
+                await append_message(sessions, inspector, owner, cid, rev,
+                                     str(uuid.uuid4()), aid, 'safe continuation')
+                raise AssertionError('stale or foreign append allowed')
+            except HTTPException as error:
+                assert error.status_code == expected_status
+        continued = await append_message(sessions, inspector, uid, cid, revision(appended.chat),
+                                         str(uuid.uuid4()), aid, 'SYNTHETIC_PII_USER_APPEND')
+        assert 'SYNTHETIC_PII_USER_APPEND' not in str(continued.chat)
+        completed = await complete_chat(sessions, inspector, uid, cid, revision(continued.chat),
+                                        os.environ['NATIVE_LLM_URL'], os.environ['LITELLM_KEY'])
+        assert completed.chat['history']['messages'][completed.chat['history']['currentId']]['role'] == 'assistant'
+        for candidate in ('SYNTHETIC_BLOCK_APPEND',):
+            try:
+                await append_message(sessions, inspector, uid, cid, revision(completed.chat),
+                    str(uuid.uuid4()), completed.chat['history']['currentId'], candidate)
+                raise AssertionError('BLOCK append allowed')
+            except HTTPException as error:
+                assert error.status_code == 403
         db = sqlite3.connect(path)
         assert db.execute('SELECT count(*) FROM chat').fetchone()[0] == 1
-        assert db.execute('SELECT count(*) FROM chat_message').fetchone()[0] == 1
-        assert db.execute('SELECT count(*) FROM firewall_nonce').fetchone()[0] == 1
+        assert db.execute('SELECT count(*) FROM chat_message').fetchone()[0] == 4
+        assert db.execute('SELECT count(*) FROM firewall_nonce').fetchone()[0] == 4
         assert raw not in '\n'.join(db.iterdump())
+        assert 'SYNTHETIC_PII_ASSISTANT_APPEND' not in '\n'.join(db.iterdump())
+        assert 'SYNTHETIC_PII_USER_APPEND' not in '\n'.join(db.iterdump())
         db.close()
         try:
             await models.Chats.insert_new_chat(cid, str(uuid.uuid4()), form('safe duplicate'))
@@ -84,11 +115,11 @@ async def main():
             assert error.status_code == 503
         db = sqlite3.connect(path)
         assert db.execute('SELECT count(*) FROM chat').fetchone()[0] == 1
-        assert db.execute('SELECT count(*) FROM chat_message').fetchone()[0] == 1
-        assert db.execute('SELECT count(*) FROM firewall_nonce').fetchone()[0] == 1
+        assert db.execute('SELECT count(*) FROM chat_message').fetchone()[0] == 4
+        assert db.execute('SELECT count(*) FROM firewall_nonce').fetchone()[0] == 4
         db.close()
         await engine.dispose()
-        print('PASS real insert_new_chat + ChatMessage: live MASK, atomic commit, BLOCK/outage rollback, duplicate isolation, DB sweep')
+        print('PASS real create/append/completion: nonce initialization, live input/output MASK, stale/owner denial, LiteLLM -> Mock, BLOCK/outage rollback, DB sweep')
 
 
 asyncio.run(main())
