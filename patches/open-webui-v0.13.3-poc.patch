@@ -1,0 +1,9 @@
+--- a/backend/open_webui/main.py
++++ b/backend/open_webui/main.py
+@@ -3267,3 +3267,6 @@
+     )
+ else:
+     log.warning(f"Frontend build directory not found at '{FRONTEND_BUILD_DIR}'. Serving API only.")
++
++from ai_firewall.webui_poc import protect
++app = protect(app)

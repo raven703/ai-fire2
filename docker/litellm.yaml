@@ -1,0 +1,14 @@
+model_list:
+  - model_name: mock
+    litellm_params:
+      model: openai/mock
+      api_base: http://mock:8000/v1
+      api_key: os.environ/MOCK_KEY
+      timeout: 3
+      max_retries: 0
+general_settings:
+  master_key: os.environ/LITELLM_KEY
+litellm_settings:
+  set_verbose: false
+  turn_off_message_logging: true
+  num_retries: 0

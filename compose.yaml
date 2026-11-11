@@ -1,0 +1,90 @@
+name: ai-fire2-poc
+x-service: &service
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.services
+  restart: "no"
+  read_only: true
+  tmpfs: [/tmp]
+services:
+  gateway:
+    <<: *service
+    environment:
+      SERVICE: gateway
+      USER_KEY: ${USER_KEY:?run scripts/setup.sh}
+      VAULT_KEY: ${VAULT_KEY:?required}
+      ADMISSION_KEY: ${ADMISSION_KEY:?required}
+      STORE_KEY: ${STORE_KEY:?required}
+      LITELLM_KEY: ${LITELLM_KEY:?required}
+      DETECTOR_FAILURE: ${DETECTOR_FAILURE:-0}
+    ports: ["127.0.0.1:8088:8000"]
+    networks: [edge, inspection, storage, inference]
+  vault:
+    <<: *service
+    environment:
+      SERVICE: vault
+      VAULT_KEY: ${VAULT_KEY:?required}
+      VAULT_TTL: ${VAULT_TTL:-3600}
+    volumes: [vault-data:/data]
+    networks: [inspection]
+  mock:
+    <<: *service
+    environment:
+      SERVICE: mock
+      MOCK_KEY: ${MOCK_KEY:?required}
+      TEST_KEY: ${TEST_KEY:?required}
+    networks: [model]
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.81.3-stable@sha256:3d80908e35230a0dfb58051ae4e2847371b2a327b44e105e79b8c4f67a65596c
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      MOCK_KEY: ${MOCK_KEY:?required}
+      LITELLM_KEY: ${LITELLM_KEY:?required}
+    volumes: [./docker/litellm.yaml:/app/config.yaml:ro]
+    networks: [inference, model]
+  webui:
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.webui
+    environment:
+      ADMISSION_KEY: ${ADMISSION_KEY:?required}
+      STORE_KEY: ${STORE_KEY:?required}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?required}
+      ENABLE_SIGNUP: "false"
+      ENABLE_OPENAI_API: "false"
+      ENABLE_OLLAMA_API: "false"
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      ANONYMIZED_TELEMETRY: "false"
+    volumes: [webui-data:/app/backend/data]
+    networks: [storage]
+  tests:
+    <<: *service
+    profiles: [test]
+    environment:
+      USER_KEY: ${USER_KEY:?required}
+      STORE_KEY: ${STORE_KEY:?required}
+      ADMISSION_KEY: ${ADMISSION_KEY:?required}
+      MOCK_KEY: ${MOCK_KEY:?required}
+      TEST_KEY: ${TEST_KEY:?required}
+      LITELLM_KEY: ${LITELLM_KEY:?required}
+      VAULT_KEY: ${VAULT_KEY:?required}
+      RUN_INTEGRATION: "1"
+    volumes: [./tests:/app/tests:ro, webui-data:/webui-data:ro]
+    networks: [inspection, storage, inference, model]
+    command: ["pytest", "-q", "/app/tests"]
+networks:
+  edge: {}
+  inspection: {internal: true}
+  storage: {internal: true}
+  inference: {internal: true}
+  model: {internal: true}
+volumes:
+  webui-data:
+  vault-data:

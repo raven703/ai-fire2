@@ -4,3 +4,6 @@ __pycache__/
 .env
 vendor/
 *.db
+.*.log
+.build.log
+.pull-webui.log

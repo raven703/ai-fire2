@@ -1,39 +1,65 @@
-# AI Firewall v2 — первая архитектурная итерация
+# AI Firewall v2 — synthetic POC
 
-Дата: 2026-11-11. **Не готово к эксплуатации. Только синтетические данные.**
-Исходные требования: AI_Firewall_v2_Architecture.docx и AI_Firewall_v2_Cline_Prompt.md в корне.
-Новый проект; код прошлых AI-Fire не использован.
+2026-11-11. Только синтетические данные, НЕ production.
 
-## Что реализовано
+## Запуск
 
-Чистый ASGI ingress с ограниченным чтением тела, fail-closed и закрытием WebSocket;
-локальный upstream Open WebUI v0.13.3, обёрнутый этим ingress без разрешающего inspector.
-По умолчанию доступны только статусы `/health`, **не чат и не UI**.
-Это намеренно закрытая сборка, а не работающий пользовательский POC.
-Контракт admission: HMAC-SHA256, hash содержимого, пользователь, операция,
-версия политики, случайный nonce, срок 30 секунд. Не интегрирован в upstream;
-одноразовость и аутентификация ещё не реализованы.
-
-## Проверки в PowerShell
-
-```powershell
-Set-Location 'C:\Personal\AI-Fire-2'
-& '.\.venv\Scripts\python.exe' -m pytest -q
-& '.\.venv\Scripts\python.exe' -m compileall -q src tests
+```sh
+cd /home/user/ai-fire2
+# Только первый раз: существующий .env не перезаписывается
+sh /home/user/ai-fire2/scripts/setup.sh
+python3 /home/user/ai-fire2/scripts/prepare-webui.py
+ docker compose build
+ docker compose up -d
+ docker compose run --rm tests
 ```
 
-Для воспроизведения окружения: Python >=3.12, `python -m venv .venv`, затем
-`.\.venv\Scripts\python.exe -m pip install -e '.[test]'`.
-Тесты используют FastAPI-макет записи, **не реальную БД Open WebUI**.
+UI: http://127.0.0.1:8088/ — введите USER_KEY из локального .env.
+Текст: `Hello SYNTHETIC_PII_ALICE_001`. Send показывает маску, Reveal last response
+восстанавливает копию ответа только для отображения. BLOCK: `SYNTHETIC_BLOCK_TEST`.
+Остановка: `docker compose stop`, без удаления volumes. Первый pull большой.
+Тесты ждут сервисы до 180 секунд; при долгой миграции повторите после старта.
 
-Архитектура и угрозы: `C:\Personal\AI-Fire-2\docs\architecture.md`.
-Отчёт: `C:\Personal\AI-Fire-2\docs\verification.md`.
-Upstream исключён из git; воспроизводимый патч хранится отдельно.
+## Реализованный срез
 
-## Следующая итерация
+Это альтернативный минимальный UI Gateway, НЕ штатный Svelte-чат Open WebUI.
+Каждый Send создаёт отдельный чат. Штатные API, history/edit/resend/import/files
+и WebSocket закрыты. Исходный барьер в
+`/home/user/ai-fire2/src/ai_firewall/ingress.py` не изменён.
 
-Аутентифицированный Privacy Gateway + обязательные Presidio/Natasha;
-санитизация всех полей chat/history/title; реальная БД upstream и canary sweep;
-Vault Postgres/AES-GCM/OpenBao и TTL; LiteLLM и buffered output scanning;
-доверенное UI-only восстановление. Затем документы, RAG, политики и fault injection.
-До этого никакие детекторы или интеграции не объявляются готовыми.
+Gateway → обязательный SyntheticDetector → Vault → LiteLLM → Mock → обязательная
+проверка ответа → admission → защищённый adapter → реальная модель Chats и БД
+Open WebUI v0.13.3. До успешной проверки ответа не сохраняется даже вход.
+Admission связан с точными input/output, identity, operation, policy, TTL 30s.
+Одноразовое потребление атомарно хранится в отдельной SQLite БД.
+/view имеет no-store, не вызывает writer. Vault недоступен сети WebUI/LiteLLM.
+Порты Mock/LiteLLM/WebUI/Vault не опубликованы; тестовый контейнер привилегирован.
+
+Код: `/home/user/ai-fire2/src/ai_firewall/services.py`,
+`/home/user/ai-fire2/src/ai_firewall/webui_poc.py`.
+Compose: `/home/user/ai-fire2/compose.yaml`; Dockerfiles и LiteLLM YAML:
+`/home/user/ai-fire2/docker/`.
+Патч `/home/user/ai-fire2/patches/open-webui-v0.13.3-poc.patch` применяется к ЧИСТОЙ
+базе b0e6098e940942281d9c83f3529ea117287a3a22, не поверх locked.patch.
+prepare-webui.py воспроизводит entrypoint из git без изменения vendor checkout.
+
+Mock: GET /health, GET /v1/models, POST /v1/chat/completions, только текст,
+stream=false. normal/echo/template/leak/injection/error/timeout выбираются
+MOCK_SCENARIO либо POST /test/scenario с отдельным TEST_KEY во внутренней сети.
+GET /test/last — защищённый RAM-only probe. Промпты не меняют сценарий.
+Gateway: /check (ALLOW/MASK либо 403 BLOCK), /chat, /view.
+VAULT_TTL — секунды, по умолчанию 3600. Секреты генерируются в .env (0600).
+Будущая локальная LLM подключается заменой provider/api_base/key в LiteLLM YAML.
+
+## Ограничения — реальные ПДн запрещены
+
+Детектор распознаёт ТОЛЬКО `SYNTHETIC_PII_[A-Za-z0-9_]+`, BLOCK — маркер
+`SYNTHETIC_BLOCK_`. Реальные email/телефоны/имена не защищает. Presidio/Natasha
+не подключены; точка расширения — обязательный inspect-адаптер.
+Vault — отдельная plaintext SQLite: нет промышленного шифрования, KMS,
+защищённого удаления страниц/WAL/backups. TTL запрещает reveal после истечения,
+очистка ленивая при store. Identity одна, привязана к USER_KEY; нет полноценного
+IAM, TLS, rate limiting и многоходового чата. Не публикуйте стенд наружу.
+Компрометация admission key вне модели POC. Нет полного CVE/SBOM-аудита upstream.
+Это узкий работающий POC, не полное выполнение интеграции штатного Open WebUI UI.
+Отчёт: `/home/user/ai-fire2/docs/poc-verification.md`.
