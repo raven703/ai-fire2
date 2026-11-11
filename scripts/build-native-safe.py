@@ -25,11 +25,12 @@ def memory():
 
 
 available, swap = memory()
-if available < 4096 or swap > 512:
+if available < 5120 or swap > 512:
     raise SystemExit(f'Unsafe starting pressure: available={available} MiB swap_used={swap} MiB')
-with (artifacts / 'native-build-3072.log').open('w') as log, (artifacts / 'native-build-memory.csv').open('w') as stats:
+log_path = artifacts / 'native-build-4096-controlled.log'
+with log_path.open('w') as log, (artifacts / 'native-build-memory.csv').open('w') as stats:
     stats.write('seconds,available_mib,swap_used_mib\n')
-    process = subprocess.Popen(['docker', 'build', '-f', 'docker/Dockerfile.native',
+    process = subprocess.Popen(['docker', 'build', '--progress=plain', '-f', 'docker/Dockerfile.native',
                                 '-t', 'ai-fire2-native:source', '.'], cwd=root,
                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     started = time.monotonic()
@@ -40,7 +41,7 @@ with (artifacts / 'native-build-3072.log').open('w') as log, (artifacts / 'nativ
             stats.write(f'{int(time.monotonic()-started)},{available},{swap}\n')
             stats.flush()
             log.flush()
-            if 'FATAL ERROR:' in (artifacts / 'native-build-3072.log').read_text(errors='replace'):
+            if 'FATAL ERROR:' in log_path.read_text(errors='replace'):
                 print('STOP: Node reported fatal heap exhaustion; cancelling own build', flush=True)
                 stopped = True
                 os.killpg(process.pid, signal.SIGINT)

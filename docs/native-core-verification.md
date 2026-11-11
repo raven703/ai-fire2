@@ -1,5 +1,34 @@
 # Native Integration Core — промежуточная реализация, НЕ принят
 
+## Контролируемая попытка 4096 MiB (после ba475bc / 46c76a3b1)
+
+- Обе рабочие ветки были чистыми; история и volumes сохранены.
+- Фактический WSL MemTotal: 7944 MiB, swap 2048 MiB; cgroup memory/swap max
+  не задают дополнительного ограничения. До остановки проектных сервисов
+  MemAvailable ~3348 MiB; после остановки ~5283 MiB.
+- NODE_OPTIONS в Docker frontend stage увеличен до 4096 MiB по запросу владельца.
+  Windows .wslconfig не изменялся.
+- Проверен BuildKit v0.31.1 (docker driver), существующий cache ~16.92 GB сохранён.
+  Добавлен persistent locked npm cache mount ai-fire2-native-npm и prefer-offline.
+  npm ci успешно завершился за 271.7s; package/source слои разделены; в журнале
+  подтверждены CACHED layers. Повторный запуск ради проверки cache не выполнялся.
+- Выполнена ровно ОДНА сборка с новым heap; параллельных сборок/Chromium не было.
+  Контейнеры двух проектных контуров временно stop, затем start через EXIT trap.
+- Watchdog отменил build через ~422s: MemAvailable=1020 MiB, swap used=71 MiB.
+  За 212 samples min available=1020 MiB, max swap=71 MiB. Exit watchdog=75,
+  docker cancellation=130. V8 OOM в этой попытке НЕ зафиксирован: сработал
+  упреждающий RAM threshold. Build/source image НЕ готовы.
+- Конкретное препятствие: нет безопасного запаса общей RAM при 4096 MiB heap
+  и текущем WSL/IDE окружении. Следующая попытка требует изменения ресурсных
+  условий; владельцу предложено увеличить WSL RAM до 10 GiB. Агент настройки
+  Windows не менял и сборку повторно не запускал.
+- Сохранены метрики artifacts/native-build-memory.csv и журнал
+  artifacts/native-build-4096-controlled.log (ignored, не коммитятся).
+- Проверки py_compile и git diff --check прошли. Новых результатов native chat
+  нет; прежние 84 tests и Chromium результаты ниже не выдаются за новый прогон.
+- Native content barrier не ослаблен; permit/writer integration не объявлена
+  готовой. Следующий этап после source build — реальная writer/event integration.
+
 ## Продолжение после восстановления WSL (2026-11-11)
 
 - Сохранены обе текущие ветки, незавершённые изменения и Docker volumes.
