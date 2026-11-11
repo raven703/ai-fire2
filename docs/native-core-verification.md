@@ -1,5 +1,28 @@
 # Native Integration Core — промежуточная реализация, НЕ принят
 
+## Writer boundary: следующий частичный шаг после 58bdad1
+
+Добавлен native_writer.py и регистрация SQLAlchemy Session events в native
+runtime. before_flush охватывает ORM writes таблиц chat/chat_message независимо
+от вызывающего REST/socket/internal handler. do_orm_execute отклоняет bulk DML
+этих таблиц. Без backend-only exact-column permit flush запрещён. Permit связывает
+полный JSON snapshot строк с signed payload; nonce потребляется через DBAPI
+соединение текущей транзакции, а не отдельную SQLite connection.
+
+Проверено в контейнере с SQLAlchemy 2.0.38 и реальной SQLite: missing permit,
+вторая мутация после consume, rollback nonce+content, запрет bulk insert,
+успешный flush+commit с durable nonce. Writer test: 1 passed; совместный запуск
+writer+permit: 5 passed (до добавления positive commit assertion, после него
+writer повторно passed). py_compile и diff --check прошли.
+
+Ограничения: это ещё не завершённая интеграция. Native lifecycle пока не выдаёт
+writer permits; AsyncSession/aiosqlite adapter и реальные Open WebUI model rows
+требуют отдельных тестов. Direct engine SQL не охвачен ORM events. Revision
+передаётся writer-адаптером и должна вычисляться из заблокированной строки, а не
+браться из request. Все content endpoints по-прежнему закрыты. Изменение runtime
+в исходниках ещё не развёрнуто в работающем image, staging не перезапускался.
+Нового native chat Chromium или полного 84-test прогона в этом шаге нет.
+
 ## Успешная source build с heap 6144 MiB
 
 - По запросу владельца NODE_OPTIONS=--max-old-space-size=6144 установлен только

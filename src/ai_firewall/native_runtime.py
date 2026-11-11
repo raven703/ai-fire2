@@ -9,6 +9,11 @@ import re
 from starlette.responses import JSONResponse
 
 from open_webui.main import app as upstream
+from ai_firewall.native_writer import install
+
+# Covers ORM writers regardless of REST/socket/internal caller. Content remains
+# closed until permitted native lifecycle writes have their own acceptance.
+install()
 
 
 class StagedNative:
