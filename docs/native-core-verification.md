@@ -1,5 +1,29 @@
 # Native Integration Core — промежуточная реализация, НЕ принят
 
+## Возобновление с 10 GiB WSL
+
+Проверено: MemTotal=9948 MiB, swap=2048 MiB; оба checkout были чистыми на
+b01fd8f / 46c76a3b1. Контейнеры после перезапуска WSL не работали.
+Выполнена одна guarded source build с NODE_OPTIONS=4096 и прежним watchdog.
+Подтверждены Docker CACHED npm/source layers; SSR build прошёл (1837 modules),
+затем запущен client build. На ~167s client/build process сообщил V8 heap
+exhaustion (live heap около 4007 MiB). Watchdog отменил собственный build.
+Минимум MemAvailable за попытку 3235 MiB, swap used=0: это V8 heap limit,
+а не нехватка общей RAM. Увеличение WSL до 10 GiB устранило предыдущий
+host-pressure blocker, но source build по-прежнему НЕ готова.
+
+Исследование graph: динамический import включает 64 translation dictionaries,
+суммарно 23174950 bytes JSON. Подготовлена экспериментальная оптимизация:
+копирование неизменённых словарей как static assets и загрузка через same-origin
+fetch с whitelist language codes. Все 64 словаря существуют. Компоненты UI и
+переводы не заменены/не удалены. Это кандидат оптимизации, НЕ доказанная причина
+OOM: размер JSON не равен размеру V8 graph. Повторная тяжёлая сборка не запущена.
+Нужны проверка static-copy destination, сборка и browser language switching;
+до этого оптимизация не принята. Ограничение Node 4096 не повышалось.
+
+В этом возобновлении выполнены только diff --check и source/dictionary checks;
+новых unit/Chromium результатов нет. Native content barrier не открыт.
+
 ## Контролируемая попытка 4096 MiB (после ba475bc / 46c76a3b1)
 
 - Обе рабочие ветки были чистыми; история и volumes сохранены.

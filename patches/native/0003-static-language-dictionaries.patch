@@ -1,0 +1,58 @@
+From e7b8d4c78773caf271c76bba911687ad7f8d512d Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Wed, 11 Nov 2026 15:41:34 +0300
+Subject: [PATCH] Experiment: serve unchanged language dictionaries outside
+ Rollup graph
+
+---
+ src/lib/i18n/index.ts | 15 +++++++++++++--
+ vite.config.ts        |  7 +++++++
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/i18n/index.ts b/src/lib/i18n/index.ts
+index 48b8a4f9b..701766b5c 100644
+--- a/src/lib/i18n/index.ts
++++ b/src/lib/i18n/index.ts
+@@ -11,8 +11,19 @@ import languages from './locales/languages.json';
+ 
+ let overrides: I18nOverrides = {};
+ 
+-export const loadBundledResource = async (language: string): Promise<Record<string, string>> =>
+-	(await import(`./locales/${language}/translation.json`)).default;
++export const loadBundledResource = async (language: string): Promise<Record<string, string>> => {
++	// Keep large dictionaries out of Rollup's module graph. Only known bundled
++	// language codes may select a same-origin static resource.
++	if (!languages.some(({ code }) => code === language)) {
++		throw new Error('Unsupported bundled language');
++	}
++	const response = await fetch(`/locales/${encodeURIComponent(language)}/translation.json`, {
++		credentials: 'same-origin',
++		cache: 'no-store'
++	});
++	if (!response.ok) throw new Error('Bundled translation unavailable');
++	return response.json();
++};
+ 
+ const loadResource = async (language: string) =>
+ 	assembleSettingsTranslations(
+diff --git a/vite.config.ts b/vite.config.ts
+index 32b244a73..f3edf319e 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -15,6 +15,13 @@ export default defineConfig({
+ 		sveltekit(),
+ 		viteStaticCopy({
+ 			targets: [
++				{
++					src: 'src/lib/i18n/locales/*/translation.json',
++					dest: 'locales',
++					// Preserve language directory names; dictionary bytes unchanged.
++					rename: (_name, _extension, fullPath) =>
++						`${fullPath.replaceAll('\\', '/').split('/').at(-2)}/translation.json`
++				},
+ 				{
+ 					src: 'src/lib/encryption/vendor/THIRD_PARTY_LICENSES.txt',
+ 					dest: 'licenses/encryption'
+-- 
+2.34.1
+
