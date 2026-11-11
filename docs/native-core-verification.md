@@ -1,3 +1,44 @@
+# Atomic native creation verification — November 11, 2026
+
+Implemented initial Chat + ChatMessage staging and one commit in upstream
+`Chats.insert_new_chat`. Message staging errors now roll back and propagate,
+rather than leaving a committed Chat. Protected creation acquires SQLite
+BEGIN IMMEDIATE before checking that the UUID is absent. Existing UUIDs are
+rejected without revealing the owner. Caller transactions without a real
+SQLite transaction fail closed. Only SQLite is supported.
+
+The complete incoming chat document is inspected by the live Gateway before
+constructing either ORM representation; the canonical sanitized document is
+returned to the caller. Scalar ORM defaults are resolved before the exact-row
+admission snapshot. Callable defaults fail closed. Pending rows must match
+both the operation's user and chat scope. The final ALLOW receipt covers both
+tables; its nonce is consumed inside the same transaction as their flush.
+
+Executed `scripts/verify-native-atomic-create.py` in a disposable source-image
+container with actual upstream models and AsyncSession/aiosqlite, mounting
+the changed source. The production inspector factory was injected without
+importing unrelated application modules; chat creation permission lookup was
+bypassed for the synthetic user. Gateway HTTP and Vault were real, not mocked.
+Verified MASK of raw input through the actual create method, canonical return,
+one Chat + one ChatMessage + one nonce committed, BLOCK and connection-outage
+rollback, rejection of duplicate UUID from another user, and absence of raw
+canary in the disposable database dump. No production-volume writes performed.
+
+Live authenticated batch verification also passed. Regression suite:
+84 passed, 1 skipped (SQLAlchemy unavailable in that test image); the separate
+source-image model test above did exercise SQLAlchemy. No new Chromium chat
+acceptance run. Results: `artifacts/native-atomic-create.log` and
+`artifacts/native-atomic-regression.log` (ignored).
+
+NOT accepted: direct-engine SQL bypass protection, alternative writer coverage,
+update revision locking, completion wiring, multi-turn Chromium, browser/log
+canary sweeps. The nonce table is provisioned explicitly by the disposable
+test, not yet by native startup. Native content routes remain CLOSED; this
+change must not be deployed as completed protected chat. No compensating
+write mechanism is used: unsupported writes remain denied at the ORM boundary,
+and the outer route barrier remains required because it does not yet protect
+direct engine SQL.
+
 # Native Integration Core — промежуточная реализация, НЕ принят
 
 ## Реальная модель и AsyncSession после b1c13cd

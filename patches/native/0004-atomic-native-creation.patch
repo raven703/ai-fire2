@@ -1,0 +1,111 @@
+From 1c97a82a93f73d39dde79619fe73416ebfb891db Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Wed, 11 Nov 2026 16:13:35 +0300
+Subject: [PATCH] Stage initial chat and message writes atomically with live
+ DLP admission
+
+---
+ backend/open_webui/models/chats.py | 60 ++++++++++++++++++++++++------
+ 1 file changed, 49 insertions(+), 11 deletions(-)
+
+diff --git a/backend/open_webui/models/chats.py b/backend/open_webui/models/chats.py
+index a11b54113..38e7b24a5 100644
+--- a/backend/open_webui/models/chats.py
++++ b/backend/open_webui/models/chats.py
+@@ -5,10 +5,13 @@ from __future__ import annotations
+ from contextlib import asynccontextmanager
+ from copy import deepcopy
+ import logging
++import os
++import json
+ import re
+ import time
+ import uuid
+ from typing import Any, Literal
++from fastapi import HTTPException
+ 
+ # local imports
+ from open_webui.models.chat_views import ChatViewState
+@@ -668,6 +671,31 @@ class ChatTable:
+     ) -> ChatModel | None:
+         await self.require_chat_creation_permission(user_id, db=db)
+         async with get_async_db_context(db) as session:
++            if os.environ.get('FIREWALL_NATIVE_WRITERS') == 'true':
++                if session.bind.dialect.name != 'sqlite':
++                    raise HTTPException(503, 'native_writer_dialect_unsupported')
++                # SQLite BEGIN IMMEDIATE must precede ownership/existence reads.
++                # Reject ambiguous caller transactions rather than accidentally
++                # binding admission to a pre-lock snapshot.
++                if not session.in_transaction():
++                    await session.execute(text('BEGIN IMMEDIATE'))
++                connection = await session.connection()
++                raw = await connection.get_raw_connection()
++                if not raw.driver_connection.in_transaction:
++                    raise HTTPException(503, 'native_lock_required')
++                existing = await session.get(Chat, id)
++                if existing is not None:
++                    raise HTTPException(409, 'native_chat_already_exists')
++                from open_webui.utils.firewall import inspector
++                from ai_firewall.native_client import revision
++
++                # Canonicalize the complete incoming document before building
++                # either ORM representation. No raw caller-owned dict is mutated.
++                clean = await inspector().inspect(
++                    {'chat': json.dumps(form_data.chat, sort_keys=True, separators=(',', ':'))},
++                    user_id, id, 'input', revision(None),
++                )
++                form_data = form_data.model_copy(update={'chat': json.loads(clean['chat'])})
+             chat = ChatModel(
+                 **{
+                     'id': id,
+@@ -689,9 +717,9 @@ class ChatTable:
+ 
+             chat_item = Chat(**chat.model_dump())
+             session.add(chat_item)
+-            await session.commit()
+ 
+-            # Dual-write initial messages to chat_message table
++            # Initial Chat and ChatMessage rows are one logical transaction.
++            # Never commit the parent before its message rows or swallow failure.
+             try:
+                 history = form_data.chat.get('history') if isinstance(form_data.chat.get('history'), dict) else {}
+                 messages = history.get('messages') if isinstance(history.get('messages'), dict) else {}
+@@ -703,16 +731,26 @@ class ChatTable:
+                     }
+                 for message_id, message in messages.items():
+                     if isinstance(message, dict) and message.get('role'):
+-                        await ChatMessages.upsert_message(
+-                            message_id=message_id,
+-                            chat_id=id,
+-                            user_id=message.get('user_id')
++                        message_user_id = (message.get('user_id')
+                             or (message['user'].get('id') if isinstance(message.get('user'), dict) else None)
+-                            or user_id,
+-                            data=message,
+-                        )
+-            except Exception as e:
+-                log.warning(f'Failed to write initial messages to chat_message table: {e}')
++                            or user_id)
++                        if os.environ.get('FIREWALL_NATIVE_WRITERS') == 'true' and message_user_id != user_id:
++                            raise HTTPException(403, 'native_writer_owner_mismatch')
++                        # Stage without intermediate flush: the permit covers
++                        # both tables' final rows in a single snapshot.
++                        session.add(ChatMessages._build_message(
++                            f'{id}-{message_id}', id, message_user_id, message, int(time.time())
++                        ))
++                if os.environ.get('FIREWALL_NATIVE_WRITERS') == 'true':
++                    from ai_firewall.native_writer import inspected_flush
++                    from ai_firewall.native_client import revision
++                    from open_webui.utils.firewall import inspector
++
++                    await inspected_flush(session, inspector(), user_id, id, revision(None))
++                await session.commit()
++            except Exception:
++                await session.rollback()
++                raise
+ 
+             return ChatModel.model_validate(chat_item) if chat_item else None
+ 
+-- 
+2.34.1
+

@@ -28,6 +28,21 @@ async def inspected_flush(session, inspector, user, chat, current_revision):
     sync = session.sync_session
     rows = [row for row in set(sync.new) | set(sync.dirty) | set(sync.deleted)
             if getattr(getattr(row, '__table__', None), 'name', None) in TABLES]
+    # Materialize scalar defaults before hashing: SQLAlchemy otherwise injects
+    # them during INSERT, after admission has covered a different column value.
+    for row in rows:
+        if getattr(row, 'user_id', None) != user:
+            raise HTTPException(403, 'native_writer_owner_mismatch')
+        scope = row.id if row.__table__.name == 'chat' else row.chat_id
+        if scope != chat:
+            raise HTTPException(403, 'native_writer_chat_mismatch')
+        if row not in sync.new:
+            continue
+        for column in row.__table__.columns:
+            if getattr(row, column.key) is None and column.default is not None:
+                if not column.default.is_scalar:
+                    raise HTTPException(503, 'native_callable_default_unreviewed')
+                setattr(row, column.key, column.default.arg)
     actual = sorted(({'table': row.__table__.name, 'delete': row in sync.deleted,
                       'columns': snapshot(row)} for row in rows),
                     key=lambda row: (row['table'], str(row['columns'].get('id'))))
