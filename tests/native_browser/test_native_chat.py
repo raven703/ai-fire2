@@ -15,6 +15,9 @@ def test_native_multiturn():
     with sync_playwright() as pw:
         browser = pw.chromium.launch(args=['--disable-dev-shm-usage'])
         page = browser.new_page(viewport={'width': 1440, 'height': 1000})
+        layout_writes = []
+        page.on('request', lambda request: layout_writes.append(request.url)
+                if request.method == 'POST' and request.url.endswith('/view') else None)
         page.goto('http://webui:8080/auth')
         page.locator('input[name="email"]').fill(identity['email'])
         page.locator('input[type="password"]').first.fill(identity['password'])
@@ -43,6 +46,8 @@ def test_native_multiturn():
         page.screenshot(path='/artifacts/native-reload-debug.png')
         expect(page.get_by_text('Continue synthetic conversation', exact=False).filter(visible=True).first).to_be_visible(timeout=30000)
         page.screenshot(path='/artifacts/native-chat-history.png')
+        expect(page.get_by_text('Layout changes not saved.', exact=False)).to_have_count(0)
+        assert layout_writes == [], 'Unchecked layout must remain RAM-only'
         storage = page.evaluate('JSON.stringify({local:{...localStorage},session:{...sessionStorage}})')
         assert canary not in storage
         composer.fill('SYNTHETIC_BLOCK_BROWSER')

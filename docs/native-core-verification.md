@@ -1,3 +1,20 @@
+# Layout autosave correction — November 11, 2026
+
+User screenshot exposed an unsupported POST /chats/{id}/view autosave after
+successful turns. Original panel API now keeps auxiliary layout in a module
+memory Map only; it sends no layout HTTP requests and uses no browser storage.
+Layout intentionally resets after reload; committed conversation history does
+not. Server POST /view remains denied. Removed the unused network helper to
+avoid accidentally reintroducing layout persistence with unchecked labels or
+prompts. Original panel components are unchanged.
+
+Rebuilt source image with BuildKit/watchdog: exit 0, no watchdog stop. Recreated
+native webui from that image. Chromium: 4 passed, 1 skipped (explicit outage
+test); includes two turns, reload and assertions that no POST /view occurs and
+the layout warning is absent. Regression: 84 passed, 1 skipped, existing warning.
+Evidence: native-layout-build.log, native-layout-browser.log,
+native-layout-regression.log. Both native and POC services restarted after build.
+
 # Native HTTP/UI integration verification — November 11, 2026
 
 The original source-built UI is running on 127.0.0.1:8089. Deploy with

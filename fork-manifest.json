@@ -5,13 +5,14 @@
   "local_path": "forks/open-webui",
   "development_branch": "firewall/native-core",
   "poc_commit": "eab205a",
-  "fork_commit": "26c1ce44a412b5eb809432ddab889114096ccd34",
+  "fork_commit": "95fa1c9ad9d4d8a1f56db1cec657973edc7371c1",
   "patch_series": [
     "patches/native/0001-native-core-staged.patch",
     "patches/native/0002-bounded-rollup-build.patch",
     "patches/native/0003-static-language-dictionaries.patch",
     "patches/native/0004-atomic-native-creation.patch",
-    "patches/native/0005-native-http-ui.patch"
+    "patches/native/0005-native-http-ui.patch",
+    "patches/native/0006-volatile-chat-layout.patch"
   ],
   "stage": "native-text-chat-e2e-partial-security-acceptance"
 }
