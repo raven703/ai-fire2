@@ -1,0 +1,279 @@
+From 87437006edbcc079e28984a2cf2bd171a8b71b8c Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Wed, 11 Nov 2026 14:23:00 +0300
+Subject: [PATCH] Stage native admission hooks and RAM-only drafts; keep
+ content runtime closed
+
+---
+ backend/open_webui/main.py             |  15 ++-
+ backend/open_webui/utils/firewall.py   | 139 +++++++++++++++++++++++++
+ backend/open_webui/utils/middleware.py |   6 ++
+ src/lib/components/chat/Chat.svelte    |  25 ++---
+ vite.config.ts                         |   4 +-
+ 5 files changed, 168 insertions(+), 21 deletions(-)
+ create mode 100644 backend/open_webui/utils/firewall.py
+
+diff --git a/backend/open_webui/main.py b/backend/open_webui/main.py
+index 29f5855f3..b1042962c 100644
+--- a/backend/open_webui/main.py
++++ b/backend/open_webui/main.py
+@@ -1107,6 +1107,16 @@ async def chat_completion(
+     form_data: dict,
+     user=Depends(get_verified_user),
+ ):
++    # Fail closed during staged native integration. No bootstrap write/event/task
++    # is permitted until writer/event controls have passed native acceptance.
++    from open_webui.utils.firewall import admit_completion
++
++    if os.environ.get('FIREWALL_NATIVE_CORE_ACCEPTED') != 'true':
++        raise HTTPException(503, 'native_core_not_accepted')
++    form_data, firewall_chat_id, firewall_revision = await admit_completion(form_data, user)
++    request.state.firewall_chat_id = firewall_chat_id
++    request.state.firewall_revision = firewall_revision
++
+     if not request.app.state.MODELS:
+         await get_all_models(request, user=user)
+ 
+@@ -1357,7 +1367,7 @@ async def chat_completion(
+         }
+ 
+         if is_new_chat:
+-            metadata['chat_id'] = str(uuid4())
++            metadata['chat_id'] = request.state.firewall_chat_id
+ 
+         if is_temporary_chat_id(metadata.get('chat_id')):
+             session_id = metadata.get('session_id')
+@@ -1697,6 +1707,9 @@ async def chat_completion(
+                 if paused:
+                     return {'status': True, 'chat_id': metadata.get('chat_id'), 'paused': True}
+ 
++                from open_webui.utils.firewall import admit_model_request
++
++                form_data = await admit_model_request(form_data, user, metadata['chat_id'])
+                 response = await chat_completion_handler(request, form_data, user)
+ 
+                 if isinstance(response, Response) and response.status_code >= 400:
+diff --git a/backend/open_webui/utils/firewall.py b/backend/open_webui/utils/firewall.py
+new file mode 100644
+index 000000000..8a286bd44
+--- /dev/null
++++ b/backend/open_webui/utils/firewall.py
+@@ -0,0 +1,139 @@
++"""Synthetic-only native admission hooks, independent of UI/browser credentials.
++
++These hooks do not replace the required route/writer/event allowlist. Runtime must
++remain disabled until those controls and native E2E have been accepted.
++"""
++import copy
++import os
++from uuid import UUID, uuid4
++
++from fastapi import HTTPException
++
++from ai_firewall.native_client import NativeInspector, revision
++
++
++def inspector():
++    return NativeInspector(os.environ['NATIVE_GATEWAY_URL'], os.environ['NATIVE_GATEWAY_KEY'],
++                           os.environ['ADMISSION_KEY'])
++
++
++def valid_id(value):
++    try:
++        if not isinstance(value, str) or str(UUID(value)) != value:
++            raise ValueError()
++    except (ValueError, TypeError, AttributeError):
++        raise HTTPException(400, 'native_invalid_id') from None
++    return value
++
++
++async def admit_completion(form_data, user):
++    from open_webui.models.chats import Chats
++
++    # Reconstruct, never recursively bless arbitrary client JSON fields.
++    allowed = {'model', 'stream', 'messages', 'params', 'chat_id', 'id', 'parent_id',
++               'user_message', 'message_ids', 'session_id', 'background_tasks',
++               'files', 'tool_ids', 'skill_ids', 'filter_ids', 'terminal_id', 'tool_servers',
++               'features', 'variables', 'chat_variables', 'folder_id', 'model_item'}
++    if not isinstance(form_data, dict) or set(form_data) - allowed:
++        raise HTTPException(400, 'native_unsupported_field')
++    for field in ('files', 'tool_ids', 'skill_ids', 'filter_ids', 'terminal_id',
++                  'tool_servers', 'variables', 'chat_variables', 'folder_id'):
++        if form_data.get(field):
++            raise HTTPException(403, 'native_operation_disabled')
++    if any(value for value in (form_data.get('features') or {}).values()):
++        raise HTTPException(403, 'native_feature_disabled')
++    if form_data.get('model') != 'mock' or form_data.get('stream') is not False:
++        raise HTTPException(403, 'native_nonstream_mock_only')
++    if form_data.get('params'):
++        # Free-text system/stop/instructions and model overrides not enabled yet.
++        params = form_data['params']
++        if set(params) - {'model_controls', 'stop'} or params.get('model_controls') or params.get('stop'):
++            raise HTTPException(403, 'native_params_disabled')
++    if form_data.get('messages'):
++        raise HTTPException(403, 'native_client_history_disabled')
++    cid = form_data.get('chat_id')
++    base = None
++    if cid:
++        valid_id(cid)
++        base = await Chats.get_chat_by_id(cid)
++        if base is None or base.user_id != user.id:
++            raise HTTPException(404, 'native_chat_not_found')
++    else:
++        cid = str(uuid4())
++    message = form_data.get('user_message')
++    if not isinstance(message, dict) or message.get('role') != 'user':
++        raise HTTPException(400, 'native_user_message_required')
++    # Reject nested extensions rather than silently retaining unchecked metadata.
++    if set(message) - {'id', 'parentId', 'childrenIds', 'role', 'content', 'timestamp', 'models', 'files'}:
++        raise HTTPException(400, 'native_message_extension_disabled')
++    if message.get('files'):
++        raise HTTPException(403, 'native_files_disabled')
++    mid = valid_id(message.get('id'))
++    parent = form_data.get('parent_id')
++    if parent is not None:
++        valid_id(parent)
++        if base is None:
++            raise HTTPException(409, 'native_parent_missing')
++        stored = await Chats.get_message_by_id_and_message_id(cid, parent)
++        if not stored or stored.get('role') != 'assistant':
++            raise HTTPException(409, 'native_parent_missing')
++    elif base is not None:
++        raise HTTPException(409, 'native_parent_required')
++    aid = valid_id(form_data.get('id'))
++    if form_data.get('message_ids'):
++        raise HTTPException(403, 'native_multimodel_disabled')
++    # Native bootstrap uses this exact UUID for new chats as well as Vault scope.
++    scope_revision = revision(base.chat if base else {})
++    clean = await inspector().inspect({'content': message.get('content')}, user.id, cid, 'input', scope_revision)
++    canonical_message = {'id': mid, 'parentId': parent, 'childrenIds': [], 'role': 'user',
++                         'content': clean['content']}
++    result = {'model': 'mock', 'stream': False, 'params': {}, 'id': aid,
++              'parent_id': parent, 'user_message': canonical_message, 'background_tasks': {}}
++    if base:
++        result['chat_id'] = cid
++    # Keep session only for native server-generated output events. Client event
++    # handlers still require an independent deny/allow review before deployment.
++    if form_data.get('session_id'):
++        if not isinstance(form_data['session_id'], str) or len(form_data['session_id']) > 128:
++            raise HTTPException(400, 'native_invalid_session')
++        result['session_id'] = form_data['session_id']
++    return result, cid, scope_revision
++
++
++async def admit_model_request(form_data, user, cid):
++    messages = form_data.get('messages')
++    if not isinstance(messages, list) or not messages or len(messages) > 80:
++        raise HTTPException(400, 'native_invalid_model_context')
++    fields = {}
++    for index, message in enumerate(messages):
++        if not isinstance(message, dict) or message.get('role') not in {'system', 'assistant', 'user'}:
++            raise HTTPException(403, 'native_tools_disabled')
++        if not isinstance(message.get('content'), str):
++            raise HTTPException(403, 'native_text_only')
++        fields[str(index)] = message['content']
++    clean = await inspector().inspect(fields, user.id, cid, 'model-request', revision(messages))
++    result = copy.deepcopy(form_data)
++    result['messages'] = [{'role': message['role'], 'content': clean[str(index)]}
++                          for index, message in enumerate(messages)]
++    result['stream'] = False
++    return result
++
++
++async def admit_output(response_data, user, cid):
++    # Discard provider metadata/error bodies; none may leak through writes/events.
++    try:
++        choices = response_data['choices']
++        if len(choices) != 1 or choices[0]['message']['role'] != 'assistant':
++            raise ValueError()
++        message = choices[0]['message']
++        if set(message) - {'role', 'content'}:
++            raise ValueError()
++        clean = await inspector().inspect({'content': message['content']}, user.id, cid,
++                                           'output', revision(response_data))
++    except HTTPException:
++        raise
++    except Exception:
++        raise HTTPException(503, 'native_invalid_model_output') from None
++    return {'id': 'native-checked', 'object': 'chat.completion', 'created': 0, 'model': 'mock',
++            'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': clean['content']},
++                         'finish_reason': 'stop'}]}
+\ No newline at end of file
+diff --git a/backend/open_webui/utils/middleware.py b/backend/open_webui/utils/middleware.py
+index 9e7cf4c54..1de2ede28 100644
+--- a/backend/open_webui/utils/middleware.py
++++ b/backend/open_webui/utils/middleware.py
+@@ -4070,6 +4070,12 @@ async def non_streaming_chat_response_handler(response, ctx):
+     if response_data is None:
+         return response
+ 
++    # Mandatory output admission precedes usage logging, events and all writes.
++    from open_webui.utils.firewall import admit_output
++
++    response_data = await admit_output(response_data, user, metadata['chat_id'])
++    response = response_data
++
+     usage = response_data.get('usage') or {}
+     timings = response_data.get('timings') or {}
+     if isinstance(usage, dict) and isinstance(timings, dict):
+diff --git a/src/lib/components/chat/Chat.svelte b/src/lib/components/chat/Chat.svelte
+index 3a81267f6..5474a82ef 100644
+--- a/src/lib/components/chat/Chat.svelte
++++ b/src/lib/components/chat/Chat.svelte
+@@ -4506,11 +4506,8 @@
+ 			});
+ 		}
+ 
+-		const stream =
+-			model?.info?.params?.stream_response ??
+-			params?.stream_response ??
+-			$settings?.params?.stream_response ??
+-			true;
++		// Protected native core only admits fully buffered text responses.
++		const stream = false;
+ 		// Always include system prompt — backend extracts it and prepends to DB messages.
+ 		// Only temp chats need conversation messages (persisted chats load from DB).
+ 		let messages: any[] = [
+@@ -5131,20 +5128,10 @@
+ 	});
+ 
+ 	const saveDraft = async (draft: any, chatId: string | null = null, debounce = true) => {
+-		if (saveDraftTimeout) {
+-			clearTimeout(saveDraftTimeout);
+-		}
+-
+-		if (draft.prompt !== null && draft.prompt.length < MAX_DRAFT_LENGTH) {
+-			const key = `chat-input${chatId ? `-${chatId}` : ''}`;
+-			const write = () => sessionStorage.setItem(key, JSON.stringify(draft));
+-			if (debounce) {
+-				saveDraftTimeout = setTimeout(write, 500);
+-			} else {
+-				write();
+-			}
+-		} else {
+-			sessionStorage.removeItem(`chat-input${chatId ? `-${chatId}` : ''}`);
++		// Protected fork: uninspected composer contents are RAM-only.
++		if (saveDraftTimeout) clearTimeout(saveDraftTimeout);
++		for (const key of Object.keys(sessionStorage)) {
++			if (key === 'chat-input' || key.startsWith('chat-input-')) sessionStorage.removeItem(key);
+ 		}
+ 	};
+ 
+diff --git a/vite.config.ts b/vite.config.ts
+index 2d57e48e6..30b204424 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -42,7 +42,9 @@ export default defineConfig({
+ 	},
+ 	build: {
+ 		target: 'es2022',
+-		sourcemap: true
++		minify: false,
++		// Large native builds must fit the local 8 GiB WSL environment.
++		sourcemap: process.env.FIREWALL_BUILD_SOURCEMAP === 'true'
+ 	},
+ 	optimizeDeps: {
+ 		esbuildOptions: { target: 'es2022' }
+-- 
+2.34.1
+

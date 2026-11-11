@@ -13,6 +13,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 
 from ai_firewall.admission import Admission
+from ai_firewall.batch import inspect_batch, native_context
 from ai_firewall.protocol import canonical, context, harden, identity, schema, text as validate_text, version
 
 
@@ -114,7 +115,10 @@ def vault_app():
         schema(data, {'value', 'user', 'chat'})
         if not isinstance(data['value'], str) or not re.fullmatch(r'SYNTHETIC_PII_[A-Za-z0-9_]{1,7900}', data['value']):
             raise HTTPException(403, 'synthetic only')
-        context(data['user'], data['chat'])
+        if data['user'] in {'synthetic-user', 'synthetic-bob'}:
+            context(data['user'], data['chat'])
+        else:
+            native_context(data['user'], data['chat'])
         row = db.execute('SELECT token FROM entries WHERE user=? AND chat=? AND value=? AND expires>?',
                          (data['user'], data['chat'], data['value'], time.time())).fetchone()
         if row:
@@ -158,6 +162,17 @@ def gateway_app():
     app = FastAPI()
     detector = SyntheticDetector()
     admission = Admission(key('ADMISSION_KEY').encode(), 'synthetic-v2')
+
+    @app.post('/native/inspect')
+    async def native_inspect(request: Request):
+        auth(request, 'NATIVE_GATEWAY_KEY')
+
+        async def store(value, user, chat):
+            result = await call('http://vault:8000/store',
+                                {'value': value, 'user': user, 'chat': chat}, 'VAULT_KEY')
+            return result['token']
+
+        return await inspect_batch(await request.json(), detector, store, admission)
 
     async def scan(text, user, chat):
         try:

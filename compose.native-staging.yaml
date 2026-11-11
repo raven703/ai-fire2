@@ -1,0 +1,6 @@
+# Explicit opt-in UI/auth staging, never a source-build or native-chat acceptance.
+services:
+  webui:
+    image: ai-fire2-native:staging
+    build:
+      dockerfile: docker/Dockerfile.native-staging

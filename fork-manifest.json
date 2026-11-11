@@ -1,0 +1,14 @@
+{
+  "upstream_url": "https://github.com/open-webui/open-webui.git",
+  "upstream_version": "v0.13.3",
+  "upstream_commit": "b0e6098e940942281d9c83f3529ea117287a3a22",
+  "local_path": "forks/open-webui",
+  "development_branch": "firewall/native-core",
+  "poc_commit": "eab205a",
+  "fork_commit": "46c76a3b14579716c0d34e96e98d3202ee981be3",
+  "patch_series": [
+    "patches/native/0001-native-core-staged.patch",
+    "patches/native/0002-bounded-rollup-build.patch"
+  ],
+  "stage": "B-partial-content-runtime-closed"
+}

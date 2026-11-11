@@ -1,0 +1,63 @@
+name: ai-fire2-native
+services:
+  webui:
+    image: ai-fire2-native:source
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.native
+    environment:
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?required}
+      ADMISSION_KEY: ${ADMISSION_KEY:?required}
+      NATIVE_GATEWAY_KEY: ${STORE_KEY:?required}
+      NATIVE_GATEWAY_URL: http://gateway:8000
+      ENABLE_SIGNUP: 'true'
+      ENABLE_LOGIN_FORM: 'true'
+      DEFAULT_USER_ROLE: pending
+      ENABLE_OPENAI_API: 'false'
+      ENABLE_OLLAMA_API: 'false'
+      SCARF_NO_ANALYTICS: 'true'
+      DO_NOT_TRACK: 'true'
+      ANONYMIZED_TELEMETRY: 'false'
+      ENABLE_OTEL: 'false'
+      ENABLE_AUDIT_LOGS_FILE: 'false'
+      ENABLE_AUDIT_STDOUT: 'false'
+      GLOBAL_LOG_LEVEL: WARNING
+    ports: ['127.0.0.1:8089:8080']
+    volumes: [native-webui-data:/app/backend/data]
+    networks: [edge, inspection]
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.services
+    environment:
+      SERVICE: gateway
+      ADMISSION_KEY: ${ADMISSION_KEY:?required}
+      NATIVE_GATEWAY_KEY: ${STORE_KEY:?required}
+      VAULT_KEY: ${VAULT_KEY:?required}
+      DETECTOR_FAILURE: ${DETECTOR_FAILURE:-0}
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [inspection]
+  vault:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.services
+    environment:
+      SERVICE: vault
+      VAULT_KEY: ${VAULT_KEY:?required}
+    volumes: [native-vault-data:/data]
+    networks: [inspection]
+  browser-tests:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.browser
+    profiles: [test]
+    volumes: [./tests/native_browser:/app/tests:ro, ./artifacts:/artifacts, native-webui-data:/webui-data:ro]
+    networks: [inspection]
+    shm_size: 256mb
+networks:
+  edge: {}
+  inspection: {internal: true}
+volumes:
+  native-webui-data:
+  native-vault-data:
