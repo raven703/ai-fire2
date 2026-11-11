@@ -8,6 +8,7 @@ Only SQLite is supported at this synthetic stage; other dialects deny writes.
 from contextlib import contextmanager
 from contextvars import ContextVar
 import json
+import sqlite3
 
 from fastapi import HTTPException
 
@@ -15,6 +16,29 @@ from ai_firewall.native_permit import consume
 
 _permit = ContextVar('native_writer_permit', default=None)
 TABLES = frozenset({'chat', 'chat_message'})
+
+
+async def inspected_flush(session, inspector, user, chat, current_revision):
+    """Flush real ORM rows using a Gateway-signed exact-row permit.
+
+    Caller must already hold the chat revision lock and have canonicalized every
+    input. This last check DENIES residual masking needs rather than silently
+    changing ORM state after lifecycle events have been constructed.
+    """
+    sync = session.sync_session
+    rows = [row for row in set(sync.new) | set(sync.dirty) | set(sync.deleted)
+            if getattr(getattr(row, '__table__', None), 'name', None) in TABLES]
+    actual = sorted(({'table': row.__table__.name, 'delete': row in sync.deleted,
+                      'columns': snapshot(row)} for row in rows),
+                    key=lambda row: (row['table'], str(row['columns'].get('id'))))
+    if not actual:
+        return
+    fields = {'rows': json.dumps(actual, sort_keys=True, separators=(',', ':'))}
+    result = await inspector.inspect(fields, user, chat, 'chat-write', current_revision, receipt=True)
+    if result['payload']['fields'] != fields or result['action'] != 'ALLOW':
+        raise HTTPException(403, 'native_writer_not_canonical')
+    with authorized_write(inspector.receipts, result['admission'], result['payload'], current_revision):
+        await session.flush()
 
 
 def snapshot(row):
@@ -61,7 +85,15 @@ def guard_flush(session, flush_context, instances):
         in_transaction = raw.in_transaction
 
         def execute(self, statement, parameters=()):
-            return dbapi.execute(statement, parameters)
+            cursor = dbapi.cursor()
+            try:
+                return cursor.execute(statement, parameters)
+            except Exception as error:
+                # Async adapters wrap sqlite integrity exceptions; normalize for
+                # the common transactional replay consumer.
+                if isinstance(error, sqlite3.IntegrityError) or 'IntegrityError' in type(error).__name__:
+                    raise sqlite3.IntegrityError('native_nonce_conflict') from None
+                raise
 
     consume(TransactionConnection(), permit['admission'], permit['token'], payload,
             payload['user'], payload['operation'], permit['revision'])

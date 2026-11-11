@@ -1,5 +1,27 @@
 # Native Integration Core — промежуточная реализация, НЕ принят
 
+## Реальная модель и AsyncSession после b1c13cd
+
+scripts/verify-native-model-writer.py выполнен внутри source image с настоящей
+моделью open_webui.models.chats.Chat, AsyncSession и aiosqlite на отдельной
+disposable SQLite. Исправлен DBAPI adapter: execute через cursor адаптированного
+соединения; прежний синхронный-only вызов не считался подтверждённым для async.
+Проверены отказ raw flush и commit реальной Chat row вместе с nonce.
+
+Добавлен inspected_flush: точный snapshot ожидающих ORM rows проходит через
+NativeInspector с проверенным Gateway receipt; writer требует ALLOW и неизменный
+snapshot, residual MASK отклоняется. Реальный AsyncSession flush этим путём
+проверен с HTTP MockTransport (НЕ живой Gateway), затем commit и два nonce/две
+строки проверены реальным SQL. Native client/permit suite: 14 passed.
+
+Это всё ещё НЕ рабочий native chat. inspected_flush не вставлен в штатные
+insert_new_chat/_chat_transaction: в insert_new_chat обнаружен отдельный commit
+Chat до dual-write ChatMessage, а writers также имеют собственные commit paths.
+Для безопасного включения нужно объединить initial dual-write в одну транзакцию,
+обработать defaults до snapshot, вычислять revision под блокировкой, закрыть
+direct engine SQL и только затем разрешить lifecycle. Socket.IO/UI completion
+ещё не включены, нового Chromium chat результата нет. Staging не изменялся.
+
 ## Writer boundary: следующий частичный шаг после 58bdad1
 
 Добавлен native_writer.py и регистрация SQLAlchemy Session events в native

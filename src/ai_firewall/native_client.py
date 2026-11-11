@@ -15,7 +15,7 @@ class NativeInspector:
         self.receipts = Admission(admission_key.encode(), 'synthetic-v2')
         self.transport = transport
 
-    async def inspect(self, fields, user, chat, operation, revision):
+    async def inspect(self, fields, user, chat, operation, revision, *, receipt=False):
         payload = dict(fields=fields, user=user, chat=chat, operation=operation, revision=revision)
         try:
             async with httpx.AsyncClient(timeout=10, trust_env=False, transport=self.transport) as client:
@@ -32,7 +32,7 @@ class NativeInspector:
                     or result['action'] not in {'ALLOW', 'MASK'}
                     or not self.receipts.verify(result['admission'], canonical(approved), user, operation)):
                 raise ValueError('invalid_receipt')
-            return approved['fields']
+            return result if receipt else approved['fields']
         except HTTPException:
             raise
         except Exception:
