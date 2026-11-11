@@ -25,10 +25,10 @@ def memory():
 
 
 available, swap = memory()
-if available < 5120 or swap > 512:
+if available < 7168 or swap > 512:
     raise SystemExit(f'Unsafe starting pressure: available={available} MiB swap_used={swap} MiB')
-log_path = artifacts / 'native-build-4096-controlled.log'
-with log_path.open('w') as log, (artifacts / 'native-build-memory.csv').open('w') as stats:
+log_path = artifacts / 'native-build-6144-controlled.log'
+with log_path.open('w') as log, (artifacts / 'native-build-6144-memory.csv').open('w') as stats:
     stats.write('seconds,available_mib,swap_used_mib\n')
     process = subprocess.Popen(['docker', 'build', '--progress=plain', '-f', 'docker/Dockerfile.native',
                                 '-t', 'ai-fire2-native:source', '.'], cwd=root,

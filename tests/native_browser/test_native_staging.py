@@ -50,3 +50,34 @@ def test_original_auth_and_closed_content():
         assert password not in dump
         assert canary not in page.evaluate('JSON.stringify({local:{...localStorage}, session:{...sessionStorage}})')
         browser.close()
+
+
+def test_source_language_assets_and_browser_language_switch():
+    """Exercise original i18n through its browser language preference on reload."""
+    api = httpx.Client(base_url='http://webui:8080', timeout=30)
+    english = api.get('/locales/en-US/translation.json')
+    russian = api.get('/locales/ru-RU/translation.json')
+    assert english.status_code == russian.status_code == 200
+    assert isinstance(english.json(), dict) and isinstance(russian.json(), dict)
+    # The complete shipped language list is checked over HTTP, not only on disk.
+    for code in json.loads(Path('/languages/languages.json').read_text()):
+        response = api.get('/locales/' + code['code'] + '/translation.json')
+        assert response.status_code == 200, code['code']
+        assert isinstance(response.json(), dict), code['code']
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(args=['--disable-dev-shm-usage'])
+        page = browser.new_page(locale='en-US')
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto('http://webui:8080/auth')
+        expect(page.locator('html')).to_have_attribute('lang', 'en-US')
+        page.evaluate("localStorage.setItem('locale', 'ru-RU'); localStorage.setItem('i18nextLng', 'ru-RU')")
+        page.reload()
+        expect(page.locator('html')).to_have_attribute('lang', 'ru-RU')
+        expect(page.locator('button[type="submit"]')).not_to_have_text('Sign in')
+        page.evaluate("localStorage.setItem('locale', 'en-US'); localStorage.setItem('i18nextLng', 'en-US')")
+        page.reload()
+        expect(page.locator('html')).to_have_attribute('lang', 'en-US')
+        expect(page.locator('button[type="submit"]')).to_have_text('Sign in')
+        assert not errors
+        browser.close()

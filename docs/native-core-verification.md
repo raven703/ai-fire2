@@ -1,5 +1,35 @@
 # Native Integration Core — промежуточная реализация, НЕ принят
 
+## Успешная source build с heap 6144 MiB
+
+- По запросу владельца NODE_OPTIONS=--max-old-space-size=6144 установлен только
+  в frontend stage. Runtime stage не наследует NODE_OPTIONS.
+- Одна guarded build: exit=0, watchdog_stop=False. Min MemAvailable=1712 MiB,
+  max swap used=1 MiB. Параллельных тяжёлых задач/Chromium не было. npm cache
+  mount и Docker BuildKit cache сохранены. Лог native-build-6144-controlled.log.
+- Собран ai-fire2-native:source, manifest digest
+  sha256:54ed89b04857de97970984e975140342e1582f678a23a6f796dc9647dfbdb813.
+- Запущен именно source image с оригинальными компонентами; fallback staging
+  image больше не используется работающим native WebUI.
+- Все 64 language static assets присутствуют в image и byte-identical source.
+  Все 64 HTTP paths возвращают JSON 200. Chromium проверил locale en-US -> ru-RU
+  -> en-US через штатную browser locale preference с reload, включая html lang
+  и текст оригинальной login-кнопки; pageerrors отсутствуют. Live Settings dropdown
+  пока не проверен (content/settings mutations остаются закрытыми).
+- Original source UI/auth Chromium + locale test: **2 passed**, 8.66s.
+  Проверка штатного signin, запрета content API, DB/browser canary также прошла.
+- Полный контейнерный регрессионный suite: **84 passed**, 1 warning, 11.67s.
+- Сохранённый POC восстановлен через start, WebUI healthy. Volumes не удалялись.
+
+Оптимизация словарей сохранена: указанные static paths и browser reload locale
+работают. Её вклад в устранение OOM отдельно не измерен — heap одновременно
+увеличен. Это не основание заявлять, что она одна исправила OOM.
+
+Главная граница неизменна: source build/UI/auth теперь реально работают, но
+Native Integration Core ещё НЕ готов. Native content endpoints закрыты;
+transaction permit к штатным writers, Socket.IO и canonical frontend echo,
+native LiteLLM/Mock multi-turn chat и полный security E2E предстоит реализовать.
+
 ## Возобновление с 10 GiB WSL
 
 Проверено: MemTotal=9948 MiB, swap=2048 MiB; оба checkout были чистыми на
