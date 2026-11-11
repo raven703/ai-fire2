@@ -1,0 +1,117 @@
+From 26c1ce44a412b5eb809432ddab889114096ccd34 Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Wed, 11 Nov 2026 17:15:31 +0300
+Subject: [PATCH] Connect original chat components to canonical protected
+ native lifecycle
+
+---
+ src/lib/apis/chats/index.ts         |  2 +-
+ src/lib/apis/index.ts               |  2 +-
+ src/lib/components/chat/Chat.svelte | 51 +++++++++++++++++++++++++++++
+ 3 files changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/apis/chats/index.ts b/src/lib/apis/chats/index.ts
+index 4a14afa5e..677a155c0 100644
+--- a/src/lib/apis/chats/index.ts
++++ b/src/lib/apis/chats/index.ts
+@@ -220,7 +220,7 @@ export const getChatList = async (
+ 		searchParams.append('include_pinned', 'true');
+ 	}
+ 
+-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/?${searchParams.toString()}`, {
++	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/native/list`, {
+ 		method: 'GET',
+ 		headers: {
+ 			Accept: 'application/json',
+diff --git a/src/lib/apis/index.ts b/src/lib/apis/index.ts
+index bb3e6c15e..7997e04ab 100644
+--- a/src/lib/apis/index.ts
++++ b/src/lib/apis/index.ts
+@@ -54,7 +54,7 @@ export const getModels = async (
+ 
+ 	let error = null;
+ 	const res = await fetch(
+-		`${WEBUI_BASE_URL}/api/models${base ? '/base' : ''}?${searchParams.toString()}`,
++		`${WEBUI_BASE_URL}/api/models/native`,
+ 		{
+ 			method: 'GET',
+ 			headers: {
+diff --git a/src/lib/components/chat/Chat.svelte b/src/lib/components/chat/Chat.svelte
+index 5474a82ef..55dcd4db6 100644
+--- a/src/lib/components/chat/Chat.svelte
++++ b/src/lib/components/chat/Chat.svelte
+@@ -435,6 +435,39 @@
+ 	}
+ 
+ 	let chat: any = null;
++	let nativeRevision: string | null = null;
++	const submitNativeTurn = async (content: string, attachments: any[]) => {
++		if (attachments.length) throw new Error('Protected chat supports text only');
++		generating = true;
++		try {
++			const response = await fetch('/api/chat/completions/native', {
++				method: 'POST',
++				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.token}` },
++				body: JSON.stringify({
++					chat_id: chat?.id ?? null,
++					revision: nativeRevision,
++					parent_id: history.currentId ?? null,
++					message_id: uuidv4(),
++					content
++				})
++			});
++			if (!response.ok) throw new Error('Protected message rejected');
++			const canonical = await response.json();
++			chat = canonical.chat;
++			nativeRevision = canonical.revision;
++			history = structuredClone(chat.chat.history);
++			chatId.set(chat.id);
++			prompt = '';
++			if (!embedded) window.history.replaceState(window.history.state, '', `/c/${chat.id}`);
++			if (canonical.error) toast.error('Response unavailable; checked input retained');
++			await tick();
++			autoScrollToBottom();
++		} catch (error) {
++			toast.error('Protected message rejected; no unchecked response published');
++		} finally {
++			generating = false;
++		}
++	};
+ 	let tags = [];
+ 
+ 	// Non-owners may reply when the sharing mode allows it, but cannot save chat edits.
+@@ -2989,6 +3022,21 @@
+ 	};
+ 
+ 	const loadChat = async (signal = startChatLoad()) => {
++		const nativeId = chatIdProp || $chatId;
++		if (nativeId) {
++			const response = await fetch(`/api/v1/chats/${nativeId}/native`, {
++				headers: { Authorization: `Bearer ${localStorage.token}` }, signal
++			});
++			if (!response.ok) { toast.error('Protected history unavailable'); return; }
++			const canonical = await response.json();
++			chat = canonical.chat;
++			nativeRevision = canonical.revision;
++			history = structuredClone(chat.chat.history);
++			selectedModels = ['mock'];
++			chatId.set(chat.id);
++			loading = false;
++			return true;
++		}
+ 		if (chatIdProp && chatIdProp !== $chatId) terminalTabs?.prepareChatSwitch();
+ 		if (chatIdProp && chatIdProp !== $chatId) {
+ 			terminalContext = null;
+@@ -3756,6 +3804,9 @@
+ 		inputFiles: any[],
+ 		bridgeRequest: { userMessageId: string; modelId: string } | null = null
+ 	) => {
++		// Native text contract is server-authoritative. Never construct or persist
++		// an optimistic raw message via the legacy completion/save lifecycle.
++		return await submitNativeTurn(inputContent, inputFiles);
+ 		if (selectedModels.includes('')) throw new Error($i18n.t('Model not selected'));
+ 		const _files = structuredClone(inputFiles);
+ 
+-- 
+2.34.1
+

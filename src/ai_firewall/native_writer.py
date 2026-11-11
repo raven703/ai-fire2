@@ -117,6 +117,7 @@ def guard_flush(session, flush_context, instances):
     consume(transaction, permit['admission'], permit['token'], payload,
             payload['user'], payload['operation'], permit['revision'])
     permit['consumed'] = True
+    permit['sql_open'] = True
 
 
 def install():
@@ -126,6 +127,62 @@ def install():
         event.listen(Session, 'before_flush', guard_flush)
     if not event.contains(Session, 'do_orm_execute', guard_bulk):
         event.listen(Session, 'do_orm_execute', guard_bulk)
+    if not event.contains(Session, 'after_flush_postexec', finish_flush):
+        event.listen(Session, 'after_flush_postexec', finish_flush)
+
+
+def finish_flush(session, flush_context):
+    state = _permit.get()
+    if state is not None:
+        state['sql_open'] = False
+    gate = session.connection().info.get('native_gate')
+    if gate is not None:
+        gate['allow'] = 0
+
+
+def sql_allowed():
+    state = _permit.get()
+    return int(bool(state and state.get('consumed') and state.get('sql_open')))
+
+
+def register_connection(dbapi, record=None):
+    gate = {'allow': 0}
+    dbapi.create_function('native_write_allowed', 0, lambda: gate['allow'])
+    if record is not None:
+        record.info['native_gate'] = gate
+    return gate
+
+
+def sql_gate(connection, cursor, statement, parameters, context, executemany):
+    if 'native_gate' not in connection.info:
+        connection.info['native_gate'] = register_connection(connection.connection.dbapi_connection)
+    connection.info['native_gate']['allow'] = sql_allowed()
+
+
+async def protect_database(engine):
+    """Persistent SQLite triggers deny even raw SQL on unregistered connections.
+
+    The callback is deliberately non-deterministic and evaluated for each row,
+    not only when SQL is prepared. Missing callback on a raw connection denies.
+    """
+    from sqlalchemy import event
+    if engine.dialect.name != 'sqlite':
+        raise RuntimeError('native_writer_dialect_unsupported')
+    sync = engine.sync_engine
+    if not event.contains(sync, 'connect', register_connection):
+        event.listen(sync, 'connect', register_connection)
+        event.listen(sync, 'before_cursor_execute', sql_gate)
+    async with engine.begin() as connection:
+        def configure(c):
+            c.info['native_gate'] = register_connection(c.connection.dbapi_connection)
+        await connection.run_sync(configure)
+        for table in sorted(TABLES):
+            for operation in ('INSERT', 'UPDATE', 'DELETE'):
+                await connection.exec_driver_sql(
+                    f'CREATE TRIGGER IF NOT EXISTS firewall_{table}_{operation.lower()} '
+                    f'BEFORE {operation} ON {table} '
+                    "WHEN native_write_allowed() != 1 BEGIN "
+                    "SELECT RAISE(ABORT, 'native_sql_writer_denied'); END")
 
 
 def guard_bulk(state):

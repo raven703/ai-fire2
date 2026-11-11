@@ -13,7 +13,7 @@ from fastapi import HTTPException
 import open_webui.models.chats as models
 from open_webui.models.chat_messages import ChatMessage
 from ai_firewall.native_permit import initialize
-from ai_firewall.native_writer import install
+from ai_firewall.native_writer import install, protect_database
 from ai_firewall.native_client import NativeInspector, revision
 from ai_firewall.native_lifecycle import append_message, complete_chat
 
@@ -32,6 +32,7 @@ async def main():
         async with engine.begin() as connection:
             await connection.run_sync(lambda sync: models.Chat.__table__.create(sync))
             await connection.run_sync(lambda sync: ChatMessage.__table__.create(sync))
+        await protect_database(engine)
         db = sqlite3.connect(path)
         # No test-side nonce provisioning: production flush must initialize it.
         db.commit()
@@ -56,6 +57,20 @@ async def main():
                 'messages': {mid: {'id': mid, 'role': 'user', 'content': value, 'timestamp': 1}}}})
         result = await models.Chats.insert_new_chat(cid, uid, form(raw))
         assert result.id == cid
+        direct = sqlite3.connect(path)
+        try:
+            direct.execute("UPDATE chat SET title='unchecked'")
+            raise AssertionError('direct SQL bypass allowed')
+        except sqlite3.DatabaseError:
+            direct.rollback()
+        finally:
+            direct.close()
+        async with engine.begin() as connection:
+            try:
+                await connection.exec_driver_sql("UPDATE chat SET title='unchecked engine'")
+                raise AssertionError('direct engine SQL bypass allowed')
+            except Exception as error:
+                assert 'native_sql_writer_denied' in str(error)
         assert raw not in str(result.chat)
         aid = str(uuid.uuid4())
         initial_revision = revision(result.chat)

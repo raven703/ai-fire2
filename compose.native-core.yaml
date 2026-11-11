@@ -1,0 +1,6 @@
+# Explicit native-core validation deployment. Unsupported routes stay denied.
+services:
+  webui:
+    environment:
+      FIREWALL_NATIVE_HTTP: 'true'
+      FIREWALL_NATIVE_WRITERS: 'true'

@@ -1,3 +1,69 @@
+# Native HTTP/UI integration verification — November 11, 2026
+
+The original source-built UI is running on 127.0.0.1:8089. Deploy with
+`docker compose -f compose.native.yaml -f compose.native-core.yaml up -d`.
+The explicit overlay enables only the protected text contract. The base
+configuration still defaults to closed content. POC remains at port 8088;
+its services were temporarily stopped for build memory and restarted. No
+volumes removed or history rewritten; all inputs were synthetic.
+
+Implemented authenticated native text completion/read/list/model-discovery
+routes using upstream get_verified_user and chat-creation permission checks.
+Routes are ordered ahead of the upstream SPA mount. Chat.svelte sends only
+one new message, IDs and revision; history is reconstructed server-side.
+The original composer, messages, navbar and sidebar remain in place.
+Chat.svelte adopts canonical committed state, never inserts raw optimistic
+messages, and restores protected history on reload. Existing RAM-only draft
+handling remains. Unsupported REST writes, Socket.IO and WebSocket are denied.
+Unsupported capability discovery returns empty lists without invoking upstream
+writers. Auxiliary chat view returns null, never reads/writes saved view data.
+
+SQLite triggers now enforce the protected write callback for INSERT/UPDATE/
+DELETE on chat and chat_message. Connection callbacks are initialized before
+upstream reconciliation tasks start. Exact-row permitted ORM flush enables
+the connection gate only for its flush and closes it afterwards. Disposable
+tests verified raw sqlite3 and direct AsyncEngine SQL UPDATE denial, as well
+as successful protected writes. This is an application boundary, not protection
+against an administrator modifying the database schema or application code.
+
+Source build completed with the 6144 MiB heap and watchdog. One intermediate
+build was cancelled by the watchdog at 877 MiB available; retry succeeded.
+Starting threshold adjusted from 7168 to 7040 MiB after stopping services;
+runtime cancellation thresholds were not relaxed. Final backend-only rebuild
+reused the successful frontend BuildKit layer. The running container was
+recreated from the final image (no remaining docker-cp-only deployment).
+
+Chromium final run: 4 passed, 1 skipped, exercising original login, PII MASK,
+two turns, displayed history after reload, BLOCK, denied alternative APIs,
+Mock request capture (masked three-message model history), browser local/
+session storage and database dump canary checks, model failure retaining
+one clean input, output BLOCK retaining one clean input, and output MASK.
+Gateway outage was separately injected by stopping its container: 1 passed.
+The skipped browser test is that same explicit-outage test in the normal run.
+Browser foreign-user check rejects a pending identity (401); verified-user
+ownership isolation is separately covered by real-model append tests, not
+claimed as a two-verified-user Chromium test.
+
+Final full regression: 84 passed, 1 skipped (SQLAlchemy absent in that image),
+one existing warning. The actual-model source-image script separately passed
+with live Gateway/Vault/LiteLLM/Mock and trigger enforcement. Existing permit
+tests cover durable replay and transactional rollback; a full native-create
+HTTP receipt replay is not exposed because clients never receive writer tokens.
+Native log sweep found no SYNTHETIC_PII_TEST_, SYNTHETIC_PII_OUTPUT_CANARY or
+SYNTHETIC_BLOCK_BROWSER in collected webui/gateway/litellm/mock logs. WebSocket
+publication is disabled; synchronous canonical HTTP is the only output path.
+
+Evidence (ignored): native-final-browser.log, native-gateway-outage-e2e.log,
+native-final-models.log, native-final-regression.log, native-final-services.log,
+native-chat-history.png, native-build-6144-controlled.log and memory CSV.
+
+Limits: text-only, mock-only, nonstream, SQLite-only, no attachments/tools,
+edits/deletes/regeneration/background tasks. Fault coverage includes output
+BLOCK, not an output-phase-only Gateway transport outage. Browser storage
+checks cover localStorage/sessionStorage; IndexedDB/CacheStorage were not
+independently enumerated. These remaining acceptance gaps must not be described
+as tested. Earlier entries below are historical checkpoints, not current state.
+
 # Native append/completion verification — November 11, 2026
 
 Added non-public `ai_firewall.native_lifecycle` server operations. Append takes

@@ -5,15 +5,39 @@ cannot be disabled by a client or the core development flag.
 """
 import json
 import re
+import os
+from contextlib import asynccontextmanager
 
 from starlette.responses import JSONResponse
 
 from open_webui.main import app as upstream
-from ai_firewall.native_writer import install
+from ai_firewall.native_writer import install, protect_database
 
 # Covers ORM writers regardless of REST/socket/internal caller. Content remains
 # closed until permitted native lifecycle writes have their own acceptance.
 install()
+from ai_firewall.native_http import router as native_router
+upstream.include_router(native_router)
+# Upstream mounts its SPA at '/'; native routes must precede that catch-all.
+native_paths = {route.path for route in native_router.routes}
+upstream.router.routes[:] = ([route for route in upstream.router.routes if getattr(route, 'path', None) in native_paths]
+                            + [route for route in upstream.router.routes if getattr(route, 'path', None) not in native_paths])
+
+
+original_lifespan = upstream.router.lifespan_context
+
+
+@asynccontextmanager
+async def guarded_lifespan(app):
+    # Install connection listeners before upstream starts reconciliation tasks;
+    # changing an event deque concurrently with first connect is unsafe.
+    from open_webui.internal.db import async_engine
+    await protect_database(async_engine)
+    async with original_lifespan(app) as state:
+        yield state
+
+
+upstream.router.lifespan_context = guarded_lifespan
 
 
 class StagedNative:
@@ -30,7 +54,23 @@ class StagedNative:
         public_get = path in {'/health', '/health/db', '/api/config', '/api/version', '/api/changelog',
                               '/api/v1/auths/', '/api/v1/users/user/settings', '/api/v1/users/user/permissions'}
         static_get = not path.startswith(('/api', '/ws', '/openai', '/ollama', '/oauth'))
-        if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)):
+        native_enabled = os.environ.get('FIREWALL_NATIVE_HTTP') == 'true'
+        if native_enabled and method == 'GET' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/view', path):
+            # No saved auxiliary view state is enabled in protected text mode.
+            return await JSONResponse({'state': None}, headers={'Cache-Control': 'no-store'})(scope, receive, send)
+        # Unsupported discovery returns no capabilities; it does not invoke
+        # upstream tools/terminal/task writers or expose their content.
+        empty_discovery = {'/api/v1/tools/', '/api/v1/terminals/', '/api/v1/configs/banners',
+                           '/api/v1/chats/all/tags', '/api/v1/notes/pinned', '/api/v1/chats/pinned',
+                           '/api/v1/folders/', '/api/v1/folders/shared', '/api/v1/functions/',
+                           '/api/v1/skills/'}
+        if native_enabled and method == 'GET' and path in empty_discovery:
+            return await JSONResponse([], headers={'Cache-Control': 'no-store'})(scope, receive, send)
+        native_get = (path in {'/api/models/native', '/api/v1/chats/native/list'}
+                      or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/native', path))
+        native_post = path == '/api/chat/completions/native'
+        if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)
+                or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post)))):
             return await JSONResponse({'detail': 'native_content_not_accepted'}, status_code=503,
                                       headers={'Cache-Control': 'no-store'})(scope, receive, send)
         if method == 'POST':

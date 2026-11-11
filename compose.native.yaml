@@ -71,8 +71,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile.browser
     profiles: [test]
+    environment:
+      TEST_KEY: ${TEST_KEY:?required}
     volumes: [./tests/native_browser:/app/tests:ro, ./artifacts:/artifacts, native-webui-data:/webui-data:ro, ./forks/open-webui/src/lib/i18n/locales:/languages:ro]
-    networks: [inspection]
+    networks: [inspection, model]
     shm_size: 256mb
 networks:
   edge: {}
