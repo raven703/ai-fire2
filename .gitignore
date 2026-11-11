@@ -7,3 +7,5 @@ vendor/
 .*.log
 .build.log
 .pull-webui.log
+.build/
+artifacts/

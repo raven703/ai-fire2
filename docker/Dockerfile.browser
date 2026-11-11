@@ -1,0 +1,5 @@
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
+WORKDIR /app
+RUN pip install --no-cache-dir playwright==1.58.0 pytest==9.2.0 httpx==0.28.1
+COPY tests/browser /app/tests
+CMD ["pytest", "-q", "-p", "no:cacheprovider", "/app/tests"]

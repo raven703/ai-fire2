@@ -11,9 +11,9 @@ import uuid
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
 
 from ai_firewall.admission import Admission
+from ai_firewall.protocol import canonical, context, harden, identity, schema, text as validate_text, version
 
 
 def key(name):
@@ -34,7 +34,8 @@ async def call(url, data, secret, method='POST'):
             response = await client.request(method, url, json=data if method == 'POST' else None,
                                             headers={'Authorization': 'Bearer ' + key(secret)})
         if response.status_code >= 400:
-            raise HTTPException(502, 'dependency_denied')
+            status = response.status_code if response.status_code in {403, 404, 409} else 502
+            raise HTTPException(status, 'dependency_denied')
         return response.json()
     except httpx.HTTPError:
         raise HTTPException(503, 'dependency_unavailable') from None
@@ -110,8 +111,17 @@ def vault_app():
     async def store(request: Request):
         auth(request, 'VAULT_KEY')
         data = await request.json()
-        if not data['value'].startswith('SYNTHETIC_PII_'):
+        schema(data, {'value', 'user', 'chat'})
+        if not isinstance(data['value'], str) or not re.fullmatch(r'SYNTHETIC_PII_[A-Za-z0-9_]{1,7900}', data['value']):
             raise HTTPException(403, 'synthetic only')
+        context(data['user'], data['chat'])
+        row = db.execute('SELECT token FROM entries WHERE user=? AND chat=? AND value=? AND expires>?',
+                         (data['user'], data['chat'], data['value'], time.time())).fetchone()
+        if row:
+            with db:
+                db.execute('UPDATE entries SET expires=? WHERE token=?',
+                           (time.time() + int(os.getenv('VAULT_TTL', '3600')), row[0]))
+            return {'token': row[0]}
         token = '[PII_' + secrets.token_hex(24) + ']'
         with db:
             db.execute('DELETE FROM entries WHERE expires <= ?', (time.time(),))
@@ -123,6 +133,9 @@ def vault_app():
     async def reveal(request: Request):
         auth(request, 'VAULT_KEY')
         data = await request.json()
+        schema(data, {'text', 'user', 'chat'})
+        if not isinstance(data['text'], str) or len(data['text']) > 8000:
+            raise HTTPException(400, 'invalid_text')
         text = data['text']
         for token in set(re.findall(r'\[PII_[a-f0-9]{48}\]', text)):
             row = db.execute('SELECT value FROM entries WHERE token=? AND user=? AND chat=? AND expires>?',
@@ -158,56 +171,82 @@ def gateway_app():
             text = text[:match.start()] + item['token'] + text[match.end():]
         return text, 'MASK' if matches else 'ALLOW'
 
-    @app.get('/')
-    async def ui():
-        return HTMLResponse('''<!doctype html><meta charset="utf-8"><h1>AI Firewall synthetic POC</h1>
-<p>Only synthetic data. Token stays in memory; no browser storage.</p>
-<input id="key" type="password" placeholder="User API key"><textarea id="text"></textarea>
-<button id="send">Send</button><button id="view">Reveal last response</button><pre id="out"></pre>
-<script>let chat;const out=document.querySelector('#out');async function req(path,body){const r=await fetch(path,{method:'POST',headers:{'Authorization':'Bearer '+document.querySelector('#key').value,'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();out.textContent=JSON.stringify(d,null,2);return d;}document.querySelector('#send').onclick=async()=>{const d=await req('/chat',{text:document.querySelector('#text').value});chat=d.chat_id;document.querySelector('#text').value='';};document.querySelector('#view').onclick=()=>req('/view',{chat_id:chat});</script>''', headers={'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; connect-src 'self'"})
-
-    def user(request):
-        auth(request, 'USER_KEY')
-        return 'synthetic-user'
-
     @app.post('/check')
     async def check(request: Request):
-        uid = user(request)
+        uid = identity(request)
         data = await request.json()
-        if set(data) != {'text'} or not isinstance(data['text'], str) or len(data['text']) > 8000:
-            raise HTTPException(400, 'invalid schema')
-        text, action = await scan(data['text'], uid, str(uuid.uuid4()))
-        return {'text': text, 'action': action}
+        schema(data, {'text'})
+        value, action = await scan(validate_text(data['text']), uid, str(uuid.uuid4()))
+        return {'text': value, 'action': action}
 
     @app.post('/chat')
     async def chat(request: Request):
-        uid = user(request)
+        uid = identity(request)
         data = await request.json()
-        if set(data) != {'text'} or not isinstance(data['text'], str) or len(data['text']) > 8000:
-            raise HTTPException(400, 'invalid schema')
-        cid = str(uuid.uuid4())
-        text, action = await scan(data['text'], uid, cid)
+        schema(data, {'text'}, {'chat_id'})
+        raw = validate_text(data['text'])
+        cid = data.get('chat_id') or str(uuid.uuid4())
+        context(uid, cid)
+        # Read ownership and history from storage, never accept client history.
+        previous = []
+        exists = bool(data.get('chat_id'))
+        if exists:
+            stored = await call('http://webui:8080/firewall/read', {'id': cid, 'user': uid}, 'STORE_KEY')
+            previous = stored['messages']
+        if len(previous) >= 40:
+            raise HTTPException(409, 'turn_limit')
+        cleaned, action = await scan(raw, uid, cid)
+        inference = [{'role': m['role'], 'content': m['content']} for m in previous]
+        # Mandatory detectors must remain available for every inference context.
+        # A pre-existing row containing a raw synthetic marker is never forwarded.
+        try:
+            for message in inference:
+                if detector.inspect(message['content']) or 'SYNTHETIC_BLOCK_' in message['content']:
+                    raise ValueError('unsafe stored history')
+        except Exception:
+            raise HTTPException(503, 'stored_history_check_failed') from None
+        inference.append({'role': 'user', 'content': cleaned})
         result = await call('http://litellm:4000/v1/chat/completions',
-                            {'model': 'mock', 'stream': False, 'messages': [{'role': 'user', 'content': text}]}, 'LITELLM_KEY')
-        output, _ = await scan(result['choices'][0]['message']['content'], uid, cid)
-        payload = {'id': cid, 'user': uid, 'input': text, 'output': output}
-        body = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()
-        token = admission.issue(body, uid, 'create')
+                            {'model': 'mock', 'stream': False, 'messages': inference}, 'LITELLM_KEY')
+        output, _ = await scan(validate_text(result['choices'][0]['message']['content']), uid, cid)
+        payload = {'id': cid, 'user': uid, 'input': cleaned, 'output': output,
+                   'base': version(previous), 'exists': exists}
+        operation = 'append' if exists else 'create'
+        token = admission.issue(canonical(payload), uid, operation)
         await call('http://webui:8080/firewall/save', {'payload': payload, 'admission': token}, 'STORE_KEY')
-        return {'chat_id': cid, 'action': action, 'input': text, 'output': output}
+        return {'chat_id': cid, 'action': action, 'input': cleaned, 'output': output}
+
+    @app.post('/history')
+    async def history(request: Request):
+        uid = identity(request)
+        data = await request.json()
+        schema(data, {'chat_id'})
+        context(uid, data['chat_id'])
+        return await call('http://webui:8080/firewall/read', {'id': data['chat_id'], 'user': uid}, 'STORE_KEY')
+
+    @app.post('/chats')
+    async def chats(request: Request):
+        uid = identity(request)
+        schema(await request.json(), set())
+        return await call('http://webui:8080/firewall/list', {'user': uid}, 'STORE_KEY')
 
     @app.post('/view')
     async def view(request: Request):
-        uid = user(request)
+        uid = identity(request)
         data = await request.json()
-        if set(data) != {'chat_id'}:
-            raise HTTPException(400, 'invalid schema')
+        schema(data, {'chat_id'}, {'message_id'})
+        context(uid, data['chat_id'])
         stored = await call('http://webui:8080/firewall/read', {'id': data['chat_id'], 'user': uid}, 'STORE_KEY')
-        result = await call('http://vault:8000/reveal', {'user': uid, 'chat': data['chat_id'], 'text': stored['output']}, 'VAULT_KEY')
-        from fastapi.responses import JSONResponse
-        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+        message = next((m for m in stored['messages'] if m['id'] == data.get('message_id')), None)
+        if data.get('message_id') and message is None:
+            raise HTTPException(404, 'not_found')
+        value = message['content'] if message else stored['output']
+        return await call('http://vault:8000/reveal', {'user': uid, 'chat': data['chat_id'], 'text': value}, 'VAULT_KEY')
+
     return app
 
 
 app = ({'mock': mock_app, 'vault': vault_app, 'gateway': gateway_app}[os.environ['SERVICE']]()
        if os.getenv('SERVICE') in {'mock', 'vault', 'gateway'} else None)
+if app is not None:
+    app = harden(app)

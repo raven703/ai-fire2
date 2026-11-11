@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from ai_firewall.admission import Admission
+from ai_firewall.protocol import version
 
 pytestmark = pytest.mark.skipif(os.getenv('RUN_INTEGRATION') != '1', reason='Compose integration only')
 
@@ -98,7 +99,8 @@ def test_mock_modes_stream_and_models():
 
 
 def test_receipt_tamper_replay_expired_and_scope():
-    payload = {'id': str(uuid.uuid4()), 'user': 'synthetic-user', 'input': 'checked', 'output': 'checked'}
+    payload = {'id': str(uuid.uuid4()), 'user': 'synthetic-user', 'input': 'checked', 'output': 'checked',
+               'base': version([]), 'exists': False}
     body = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()
     admission = Admission(os.environ['ADMISSION_KEY'].encode(), 'synthetic-v2')
     token = admission.issue(body, payload['user'], 'create')
@@ -110,7 +112,7 @@ def test_receipt_tamper_replay_expired_and_scope():
     expired = Admission(os.environ['ADMISSION_KEY'].encode(), 'synthetic-v2', lambda: time.time()-40).issue(body, payload['user'], 'create')
     assert save(expired).status_code == 403
     assert save(token).status_code == 200
-    assert save(token).status_code == 403
+    assert save(token).status_code in {403, 409}
 
 
 @pytest.mark.parametrize('path', ['/api/v1/chats/new', '/api/v1/chats/import', '/api/chat/completions',

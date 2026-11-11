@@ -12,13 +12,13 @@ services:
     environment:
       SERVICE: gateway
       USER_KEY: ${USER_KEY:?run scripts/setup.sh}
+      USER_B_KEY: ${USER_B_KEY:?run scripts/setup.sh}
       VAULT_KEY: ${VAULT_KEY:?required}
       ADMISSION_KEY: ${ADMISSION_KEY:?required}
       STORE_KEY: ${STORE_KEY:?required}
       LITELLM_KEY: ${LITELLM_KEY:?required}
       DETECTOR_FAILURE: ${DETECTOR_FAILURE:-0}
-    ports: ["127.0.0.1:8088:8000"]
-    networks: [edge, inspection, storage, inference]
+    networks: [inspection, storage, inference]
   vault:
     <<: *service
     environment:
@@ -51,24 +51,33 @@ services:
       start_period: 60s
     build:
       context: .
-      dockerfile: docker/Dockerfile.webui
+      dockerfile: docker/Dockerfile.frontend
     environment:
       ADMISSION_KEY: ${ADMISSION_KEY:?required}
       STORE_KEY: ${STORE_KEY:?required}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?required}
+      USER_KEY: ${USER_KEY:?required}
+      USER_B_KEY: ${USER_B_KEY:?required}
       ENABLE_SIGNUP: "false"
       ENABLE_OPENAI_API: "false"
       ENABLE_OLLAMA_API: "false"
       SCARF_NO_ANALYTICS: "true"
       DO_NOT_TRACK: "true"
       ANONYMIZED_TELEMETRY: "false"
+      ENABLE_OTEL: "false"
+      ENABLE_AUDIT_LOGS_FILE: "false"
+      ENABLE_AUDIT_STDOUT: "false"
+      LOGURU_DIAGNOSE: "false"
+      GLOBAL_LOG_LEVEL: "WARNING"
     volumes: [webui-data:/app/backend/data]
-    networks: [storage]
+    ports: ["127.0.0.1:8088:8080"]
+    networks: [edge, storage]
   tests:
     <<: *service
     profiles: [test]
     environment:
       USER_KEY: ${USER_KEY:?required}
+      USER_B_KEY: ${USER_B_KEY:?required}
       STORE_KEY: ${STORE_KEY:?required}
       ADMISSION_KEY: ${ADMISSION_KEY:?required}
       MOCK_KEY: ${MOCK_KEY:?required}
@@ -79,6 +88,19 @@ services:
     volumes: [./tests:/app/tests:ro, webui-data:/webui-data:ro]
     networks: [inspection, storage, inference, model]
     command: ["pytest", "-q", "/app/tests"]
+  browser-tests:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.browser
+    profiles: [test]
+    environment:
+      USER_KEY: ${USER_KEY:?required}
+      USER_B_KEY: ${USER_B_KEY:?required}
+      TEST_KEY: ${TEST_KEY:?required}
+      FAULT_MODE: ${FAULT_MODE:-none}
+    volumes: [./tests/browser:/app/tests:ro, ./artifacts:/artifacts, webui-data:/webui-data:ro]
+    networks: [storage, model]
+    shm_size: 256mb
 networks:
   edge: {}
   inspection: {internal: true}

@@ -1,4 +1,36 @@
-# AI Firewall v2 — synthetic POC
+# AI Firewall v2 — итерация 3, защищённый Svelte чат
+
+Текущий запуск — `/home/user/ai-fire2/compose.yaml`, UI обслуживает Protected
+Open WebUI на `http://127.0.0.1:8088/`, временный Gateway UI удалён.
+Это ограниченная защищённая редакция upstream интерфейса, не минимально изменённый
+полный штатный Chat.svelte. Подробности и честные границы результата:
+`/home/user/ai-fire2/docs/iteration-3-verification.md`.
+
+```sh
+cd /home/user/ai-fire2
+# Для нового .env, только один раз:
+sh /home/user/ai-fire2/scripts/setup.sh
+# Если .env уже существует со второй итерации, добавьте USER_B_KEY:
+# printf '\nUSER_B_KEY=%s\n' "$(openssl rand -hex 32)" >> /home/user/ai-fire2/.env
+python3 /home/user/ai-fire2/scripts/prepare-webui.py
+python3 /home/user/ai-fire2/scripts/prepare-iteration3.py
+docker compose build webui gateway vault mock tests browser-tests
+docker compose up -d
+sh /home/user/ai-fire2/scripts/verify-iteration3.sh
+```
+
+Войти с USER_KEY или USER_B_KEY из `.env`. Пример сообщения:
+`Hello SYNTHETIC_PII_ALICE_001`. Кнопка «Показать оригинал» раскрывает только
+выбранное сообщение. Следующие сообщения используют server-owned masked history.
+BLOCK: `SYNTHETIC_BLOCK_TEST`. 20 turns/chat; новый чат создаётся в БД после
+первого успешного turn. Только синтетические ПДн — не реальные данные.
+
+Для остановки: `docker compose stop`. Не удаляйте volumes для обычного перезапуска.
+Патч `/home/user/ai-fire2/patches/open-webui-v0.13.3-iteration3.patch` включает
+backend entrypoint, Svelte UI и удаление неподдержанных routes; generator проверяет
+git apply на чистом pinned checkout. Vendor working tree не изменяется.
+
+## Архив описания итерации 2 (не текущая инструкция запуска)
 
 2026-11-11. Только синтетические данные, НЕ production.
 
