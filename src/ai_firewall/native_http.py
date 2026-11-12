@@ -23,6 +23,26 @@ from ai_firewall.native_writer import inspected_flush
 router = APIRouter()
 
 
+@router.post('/api/v1/dlp/policies')
+async def policy_manager(data:dict,user=Depends(get_verified_user)):
+    # Explicit auditor identities are operator configuration, never browser claims.
+    auditors=set(os.getenv('DLP_AUDITOR_IDS','').split(','))
+    if user.role!='admin' and user.id not in auditors:
+        raise HTTPException(403,'dlp_role_required')
+    if user.role!='admin' and data.get('action')!='view':
+        raise HTTPException(403,'dlp_admin_required')
+    if set(data)-{'action','policy','id','expected'}:
+        raise HTTPException(400,'invalid_policy_request')
+    try:
+        async with httpx.AsyncClient(timeout=10,trust_env=False) as client:
+            response=await client.post(os.environ['DLP_POLICY_URL']+'/policy-manager',
+                headers={'Authorization':'Bearer '+os.environ['STORE_KEY']},
+                json={**data,'actor':user.id})
+        if response.status_code!=200: raise HTTPException(response.status_code,'policy_operation_denied')
+        return response.json()
+    except httpx.HTTPError: raise HTTPException(503,'policy_service_unavailable') from None
+
+
 class Reveal(BaseModel):
     model_config = ConfigDict(extra='forbid')
     message_id: str

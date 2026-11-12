@@ -27,12 +27,28 @@ async def lifespan(app):
     base=create_pipeline()
     app.state.pipeline=DetectorPipeline([*base.detectors,*policy.detectors])
     app.state.policy=policy
+    from ai_firewall.policy_store import PolicyStore
+    app.state.policy_store=PolicyStore(os.getenv('DLP_POLICY_DB','/tmp/dlp-policy.db'),'/app/config/pii-policy-v1.yaml')
+    app.state.base=base
     app.state.pipeline.inspect('Проверка готовности')
     yield
 
 
 app=FastAPI(lifespan=lifespan)
 worker=app
+
+
+@app.post('/policy-manager')
+def manage_policy(request:Request,data:dict):
+    auth(request,'NATIVE_GATEWAY_KEY')
+    schema(data,{'action','actor'}, {'policy','id','expected'})
+    store=worker.state.policy_store
+    try:
+        if data['action']=='view': return store.view()
+        if data['action']=='draft': return {'id':store.draft(data['policy'],data['actor'])}
+        if data['action']=='publish': return {'id':store.publish(data['id'],data['actor'],data['expected'])}
+        raise ValueError('invalid_action')
+    except (ValueError,KeyError): raise HTTPException(400,'invalid_policy_operation') from None
 
 
 @app.get('/health')
@@ -49,8 +65,13 @@ def inspect(request: Request, data: dict):
     if sum(map(len,values.values()))>128000: raise HTTPException(413,'batch_too_large')
     try:
         if os.getenv('PII_MODEL_FAILURE')=='1': raise RuntimeError()
-        policy=worker.state.policy
-        action,decisions=inspect_object(values,worker.state.pipeline,policy,
+        # Snapshot policy once per inspection. SQLite active pointer is atomic.
+        snapshot=worker.state.policy_store.view()
+        import tempfile,yaml
+        with tempfile.NamedTemporaryFile(mode='w',suffix='.yaml') as f:
+            yaml.safe_dump(snapshot['policy'],f); f.flush(); policy=YAMLPolicy(f.name)
+        pipeline=DetectorPipeline([*worker.state.base.detectors,*policy.detectors])
+        action,decisions=inspect_object(values,pipeline,policy,
             PolicyContext('synthetic-test','synthetic-test',data['operation'],policy.version))
         if action in {Action.BLOCK,Action.REVIEW}: raise HTTPException(403,action.value)
         cleaned=dict(values); categories=set()
