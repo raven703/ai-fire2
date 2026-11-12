@@ -10,13 +10,13 @@ from uuid import uuid4
 from ai_firewall.pii_policy import YAMLPolicy
 
 
-def validate(document):
+def validate(document,trusted_patterns=()):
     import yaml
     if not isinstance(document,dict): raise ValueError('invalid_policy')
-    # Restrict custom regex to bounded patterns; runtime also applies timeout.
+    # BoundedRegex enforces a runtime timeout, including trusted baseline patterns.
     for rule in document.get('regex',[]):
         pattern=rule.get('pattern','')
-        if len(pattern)>512 or any(x in pattern for x in ('(?','\\1','\\2','*','+','{')):
+        if not isinstance(pattern,str) or len(pattern)>512 or any(x in pattern for x in ('\\1','\\2')):
             raise ValueError('unbounded_regex_not_permitted')
     with tempfile.NamedTemporaryFile(mode='w',suffix='.yaml') as f:
         yaml.safe_dump(document,f); f.flush(); YAMLPolicy(f.name)
@@ -53,6 +53,14 @@ class PolicyStore:
             draft=db.execute("SELECT v.id,v.body FROM state s JOIN versions v ON s.id=v.id WHERE s.name='draft'").fetchone()
             history=[dict(zip(('at','actor','action','version','digest'),r)) for r in db.execute('SELECT * FROM audit ORDER BY rowid DESC LIMIT 100')]
             return {'active':active,'policy':body,'draft':{'id':draft[0],'policy':json.loads(draft[1])} if draft else None,'history':history}
+
+    def snapshot(self,identifier=None):
+        with self.db() as db:
+            if identifier is None:
+                identifier=db.execute("SELECT id FROM state WHERE name='active'").fetchone()[0]
+            row=db.execute('SELECT body FROM versions WHERE id=?',(identifier,)).fetchone()
+            if not row: raise ValueError('unknown_policy_revision')
+            return identifier,json.loads(row[0])
 
     def draft(self,document,actor):
         validate(document)

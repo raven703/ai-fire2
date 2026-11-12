@@ -58,6 +58,7 @@ async def append_message(sessions, inspector, user, chat_id, expected_revision,
                                             'input' if role == 'user' else 'output', current)
             now = int(time.time())
             message = {'id': message_id, 'parentId': parent_id, 'childrenIds': [],
+                       'dlp_policy_revision':getattr(inspector,'policy_revision',None),
                        'role': role, 'content': clean['content'], 'timestamp': now,
                        'done': True}
             messages[parent_id]['childrenIds'] = [message_id]

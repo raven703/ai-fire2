@@ -10,6 +10,9 @@ services:
       PII_TEST_ONLY: 'true'
       NATIVE_GATEWAY_KEY: ${STORE_KEY:?required}
       PII_MODEL_FAILURE: ${PII_MODEL_FAILURE:-0}
+      DLP_POLICY_DB: /policy/policies.db
+    volumes:
+      - native-policy-data:/policy
     read_only: true
     tmpfs: [/tmp]
     mem_limit: 768m
@@ -35,4 +38,7 @@ services:
       DLP_DEBUG_TEST_ONLY: 'true'
       NATIVE_MOCK_TEST_URL: http://mock:8000
       TEST_KEY: ${TEST_KEY:?required}
+      DLP_POLICY_URL: http://pii:8000
     networks: [edge, inspection, model]
+volumes:
+  native-policy-data:

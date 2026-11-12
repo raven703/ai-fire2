@@ -66,14 +66,24 @@ def health():
 @app.post('/store-batch')
 def store(request:Request,data:dict):
     authorize(request,'VAULT_WRITE_KEY_FILE')
-    schema(data,{'tenant','user','chat','values','verdict','policy_version'})
+    schema(data,{'tenant','user','chat','values','verdict','policy_version'}, {'policy_revision','mask_approval'})
     context=scope(data)
     if data['verdict']!='MASK' or data['policy_version']!='synthetic-evaluation-v1':
         raise HTTPException(403,'final_mask_required')
     values=data['values']
+    if (not isinstance(values,list) or not 1<=len(values)<=128
+            or any(not isinstance(v,str) or not 1<=len(v)<=16384 for v in values)
+            or sum(len(v.encode()) for v in values)>128000):
+        raise HTTPException(400,'invalid_values')
+    if os.getenv('MASK_ATTESTATION_KEY_FILE'):
+        from ai_firewall.mask_attestation import verify
+        if data['tenant']!='synthetic' or not verify(secret('MASK_ATTESTATION_KEY_FILE'),data.get('mask_approval'),data['user'],data['chat'],data.get('policy_revision'),values):
+            raise HTTPException(403,'mask_approval_required')
     # Deliberately prohibit real PII in this acceptance contour, irrespective of
     # Gateway caller claims. A separate migration is required to remove this gate.
-    if (not isinstance(values,list) or not 1<=len(values)<=128 or
+    approved_general=(os.getenv('MASK_ATTESTATION_KEY_FILE') and
+        (data.get('mask_approval',{}).get('synthetic') is True or os.getenv('DLP_REAL_DATA_ENABLED')=='true'))
+    if not approved_general and (not isinstance(values,list) or not 1<=len(values)<=128 or
             any(not isinstance(v,str) or not (re.fullmatch(r'SYNTHETIC_V2_[A-Za-z0-9_]{1,200}',v)
                 or v in SYNTHETIC_VALUES) for v in values)):
         raise HTTPException(403,'synthetic_v2_fixture_required')

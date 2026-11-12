@@ -29,12 +29,13 @@ class YAMLPolicy:
                     or not isinstance(data['dictionaries'],dict) or len(data['dictionaries'])>32
                     or not isinstance(data['regex'],list) or len(data['regex'])>32): raise ValueError()
             for rule in data['rules']:
-                if (set(rule)!={'entity','action','threshold'} or not isinstance(rule['entity'],str)
+                if (set(rule)-{'entity','action','threshold','enabled'} or not {'entity','action','threshold'}<=set(rule)
+                        or type(rule.get('enabled',True)) is not bool or not isinstance(rule['entity'],str)
                         or not regex.fullmatch('[A-Z][A-Z0-9_]{0,63}',rule['entity'])
                         or rule['entity'] in self.rules or type(rule['threshold']) not in {int,float}
                         or not 0<=rule['threshold']<=1):
                     raise ValueError()
-                self.rules[rule['entity']]=(Action(rule['action']),rule['threshold'])
+                self.rules[rule['entity']]=(Action(rule['action']) if rule.get('enabled',True) else Action.ALLOW,rule['threshold'])
             self.detectors=[]
             for name,terms in data['dictionaries'].items():
                 if (name not in self.rules or not isinstance(terms,list) or not 1<=len(terms)<=1000

@@ -1,0 +1,88 @@
+diff --git a/src/routes/(app)/admin/+layout.svelte b/src/routes/(app)/admin/+layout.svelte
+index 3200b71d4..dd802d740 100644
+--- a/src/routes/(app)/admin/+layout.svelte
++++ b/src/routes/(app)/admin/+layout.svelte
+@@ -14,7 +14,12 @@
+ 
+ 	onMount(async () => {
+ 		if ($user?.role !== 'admin') {
+-			await goto('/', { replaceState: true });
++			let auditor=false;
++			if ($page.url.pathname==='/admin/dlp') {
++				const response=await fetch('/api/v1/dlp/policies',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.token}`},body:JSON.stringify({action:'view'})});
++				auditor=response.ok;
++			}
++			if (!auditor) await goto('/', { replaceState: true });
+ 		} else if (
+ 			!$config?.features?.enable_functions &&
+ 			$page.url.pathname.includes('/admin/functions')
+@@ -65,6 +70,7 @@
+ 				{/if}
+ 
+ 				<div class="flex w-full items-center">
++					<a class="px-3" href="/admin/dlp">DLP Policies</a>
+ 					<div
+ 						class="flex min-w-0 mr-1.5 items-center gap-0.5 md:gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-normal bg-transparent py-1 touch-auto pointer-events-auto"
+ 					>
+diff --git a/src/routes/(app)/admin/dlp/+page.svelte b/src/routes/(app)/admin/dlp/+page.svelte
+new file mode 100644
+index 000000000..f52ba5651
+--- /dev/null
++++ b/src/routes/(app)/admin/dlp/+page.svelte
+@@ -0,0 +1,55 @@
++<script lang="ts">
++ import { onMount } from 'svelte';
++ let state:any=null;
++ let document='';
++ let error='';
++ let busy=false;
++ let editor:any=null;
++ function sync(){document=JSON.stringify(editor,null,2);}
++ async function request(payload:any) {
++  const response=await fetch('/api/v1/dlp/policies',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.token}`},body:JSON.stringify(payload)});
++  if(!response.ok) throw new Error(`DLP operation denied (${response.status})`);
++  return response.json();
++ }
++ async function refresh(){state=await request({action:'view'});editor=structuredClone(state.draft?.policy??state.policy);sync();}
++ async function action(kind:string,id?:string){busy=true;error='';try{
++  if(kind==='draft') await request({action:kind,policy:JSON.parse(document)});
++  else await request({action:'publish',id:id??state.draft?.id,expected:state.active});
++  await refresh();
++ }catch(e){error=String(e);}finally{busy=false;}}
++ onMount(()=>{refresh().catch(e=>error=String(e));});
++</script>
++<div class="p-6 w-full overflow-y-auto">
++ <h1 class="text-xl font-semibold">DLP Policy Manager</h1>
++ <p>JSON: rules (entity/action/threshold), dictionaries, regex. ALLOW disables a category decision, not mandatory inspection.</p>
++ {#if error}<p role="alert" class="text-red-600">{error}</p>{/if}
++ {#if state}
++  <p>Active revision: {state.active}</p>
++  <fieldset disabled={busy||!state.can_edit}>
++  <table class="w-full text-left"><thead><tr><th>Category</th><th>Action</th><th>Threshold</th></tr></thead><tbody>
++  {#each editor.rules as rule}
++   <tr><td><input type="checkbox" aria-label={`Enabled ${rule.entity}`} checked={rule.enabled!==false} on:change={(event)=>{rule.enabled=event.currentTarget.checked;sync();}} />{rule.entity}</td><td><select aria-label={`Action ${rule.entity}`} bind:value={rule.action} on:change={sync} class="dark:bg-gray-900">
++   {#each ['ALLOW','MASK','BLOCK','REVIEW'] as choice}<option>{choice}</option>{/each}
++   </select></td><td><input aria-label={`Threshold ${rule.entity}`} type="number" min="0" max="1" step="0.05" bind:value={rule.threshold} on:input={sync} class="w-20 dark:bg-gray-900" /></td></tr>
++  {/each}</tbody></table>
++  <h2>Corporate dictionaries (one entry per line)</h2>
++  {#each Object.keys(editor.dictionaries) as category}
++   <label>{category}<textarea class="w-full border dark:bg-gray-900" value={editor.dictionaries[category].join('\n')} on:input={(event)=>{editor.dictionaries[category]=event.currentTarget.value.split('\n').filter(Boolean);sync();}} /></label>
++  {/each}
++  <h2>Regex</h2>
++  {#each editor.regex as rule}<div>{rule.entity}<input class="w-full border dark:bg-gray-900" bind:value={rule.pattern} on:input={sync}/></div>{/each}
++  <details><summary>Advanced JSON</summary>
++  <textarea aria-label="Policy JSON" class="w-full h-96 font-mono border rounded p-3 dark:bg-gray-900" bind:value={document}></textarea>
++  </details>
++  <button disabled={busy} on:click={()=>action('draft')}>Save draft</button>
++  <button disabled={busy||!state.draft} on:click={()=>action('publish')}>Publish draft</button>
++  </fieldset>
++  {#if !state.can_edit}<p>Read-only auditor access. Publication and reveal are separate permissions.</p>{/if}
++  <h2 class="text-lg mt-4">Audit / rollback</h2>
++  {#each state.history as entry}
++   <div class="border-b py-2">{entry.action} · {entry.version} · {new Date(entry.at*1000).toISOString()}
++    <button disabled={busy||!state.can_edit} on:click={()=>action('publish',entry.version)}>Restore this version</button>
++   </div>
++  {/each}
++ {/if}
++</div>
+\ No newline at end of file

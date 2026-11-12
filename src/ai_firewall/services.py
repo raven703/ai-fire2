@@ -191,7 +191,9 @@ def gateway_app():
         if os.getenv('PII_TEST_URL'):
             # Mandatory bounded worker; no Vault call until its full verdict.
             nlp = await call(os.environ['PII_TEST_URL'] + '/inspect',
-                {'fields': data.get('fields'), 'operation': data.get('operation')}, 'NATIVE_GATEWAY_KEY')
+                {'fields': data.get('fields'), 'operation': data.get('operation'),
+                 'user':data.get('user'),'chat':data.get('chat'),
+                 'policy_revision':request.headers.get('X-Policy-Revision') or None}, 'NATIVE_GATEWAY_KEY')
             if (nlp.get('action') not in {'ALLOW', 'MASK'} or not isinstance(nlp.get('fields'), dict)
                     or set(nlp['fields']) != set(data.get('fields', {}))):
                 raise HTTPException(503, 'invalid_nlp_verdict')
@@ -199,13 +201,22 @@ def gateway_app():
                 from pathlib import Path
                 raw = data['fields']
                 spans = [(name, span) for name in sorted(raw) for span in nlp['spans'][name]]
+                if not 1<=len(spans)<=128: raise HTTPException(503,'invalid_mask_spans')
+                for name in raw:
+                    end=0
+                    for s in nlp['spans'][name]:
+                        if (set(s)!={'start','end'} or type(s['start']) is not int or type(s['end']) is not int
+                                or not end<=s['start']<s['end']<=len(raw[name])):
+                            raise HTTPException(503,'invalid_mask_spans')
+                        end=s['end']
                 try:
                     async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
                         response = await client.post(os.environ['VAULT_V2_URL'] + '/store-batch',
                             headers={'Authorization': 'Bearer ' + Path(os.environ['VAULT_V2_WRITE_KEY_FILE']).read_text().strip()},
                             json={'tenant': 'synthetic', 'user': data['user'], 'chat': data['chat'],
                                   'values': [raw[name][s['start']:s['end']] for name,s in spans],
-                                  'verdict': 'MASK', 'policy_version': nlp['policy_version']})
+                                  'verdict': 'MASK', 'policy_version': nlp['policy_version'],
+                                  'policy_revision':nlp['policy_revision'],'mask_approval':nlp.get('mask_approval')})
                         response.raise_for_status()
                         tokens = response.json()['tokens']
                     cleaned = dict(raw)
@@ -221,6 +232,7 @@ def gateway_app():
         result['categories'] = sorted(set((nlp['categories'] if nlp else []) +
             (['SYNTHETIC_PII'] if result['action'] == 'MASK' and not (nlp and nlp['categories']) else [])))
         result['policy_version'] = nlp['policy_version'] if nlp else 'synthetic-v2'
+        result['policy_revision'] = nlp.get('policy_revision') if nlp else None
         return result
 
     async def scan(text, user, chat):

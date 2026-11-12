@@ -58,7 +58,7 @@ def health(): return {'ready':True,'policy_version':worker.state.policy.version}
 @app.post('/inspect')
 def inspect(request: Request, data: dict):
     auth(request,'NATIVE_GATEWAY_KEY')
-    schema(data,{'fields','operation'})
+    schema(data,{'fields','operation'},{'policy_revision','user','chat'})
     fields=data['fields']
     if not isinstance(fields,dict) or not 1<=len(fields)<=256: raise HTTPException(400,'invalid_fields')
     values={k:text(v) for k,v in fields.items()}
@@ -66,10 +66,10 @@ def inspect(request: Request, data: dict):
     try:
         if os.getenv('PII_MODEL_FAILURE')=='1': raise RuntimeError()
         # Snapshot policy once per inspection. SQLite active pointer is atomic.
-        snapshot=worker.state.policy_store.view()
+        policy_revision,document=worker.state.policy_store.snapshot(data.get('policy_revision'))
         import tempfile,yaml
         with tempfile.NamedTemporaryFile(mode='w',suffix='.yaml') as f:
-            yaml.safe_dump(snapshot['policy'],f); f.flush(); policy=YAMLPolicy(f.name)
+            yaml.safe_dump(document,f); f.flush(); policy=YAMLPolicy(f.name)
         pipeline=DetectorPipeline([*worker.state.base.detectors,*policy.detectors])
         action,decisions=inspect_object(values,pipeline,policy,
             PolicyContext('synthetic-test','synthetic-test',data['operation'],policy.version))
@@ -80,7 +80,14 @@ def inspect(request: Request, data: dict):
                 categories.update(f.entity_type for f in span.findings)
                 # Irreversible, scoped to this result; no original retained anywhere.
                 cleaned[name]=cleaned[name][:span.start]+'[DLP_REDACTED]'+cleaned[name][span.end:]
-        return {'fields':cleaned,'action':action.value,'categories':sorted(categories),'policy_version':policy.version,
+        from ai_firewall.mask_attestation import issue
+        from pathlib import Path
+        proof=None
+        if action==Action.MASK and os.getenv('MASK_ATTESTATION_KEY_FILE'):
+            selected=[values[name][s.start:s.end] for name in sorted(values) for s in decisions[name].spans]
+            proof=issue(Path(os.environ['MASK_ATTESTATION_KEY_FILE']).read_text().strip(),data['user'],data['chat'],policy_revision,selected,
+                synthetic=os.getenv('DLP_SYNTHETIC_EXERCISE')=='true')
+        return {'mask_approval':proof,'fields':cleaned,'action':action.value,'categories':sorted(categories),'policy_version':policy.version,'policy_revision':policy_revision,
             'spans':{name:[{'start':s.start,'end':s.end} for s in decision.spans] for name,decision in decisions.items()}}
     except HTTPException: raise
     except Exception: raise HTTPException(503,'mandatory_nlp_failed') from None

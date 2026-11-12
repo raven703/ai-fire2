@@ -20,6 +20,18 @@ def test_draft_publish_rollback_and_conflict(tmp_path):
     assert 'body' not in store.view()['history'][0]
 
 
-def test_unbounded_regex_denied():
+def test_backreference_regex_denied():
     with pytest.raises(ValueError):
-        validate({'regex':[{'pattern':'(a+)+','entity':'PERSON'}]})
+        validate({'regex':[{'pattern':r'(a)\1','entity':'PERSON'}]})
+
+
+def test_snapshot_and_baseline_edit(tmp_path):
+    from pathlib import Path
+    baseline=Path('/app/config/pii-policy-v1.yaml')
+    store=PolicyStore(str(tmp_path/'db'),baseline)
+    initial,document=store.snapshot()
+    document['rules'][0]['action']='BLOCK'
+    draft=store.draft(document,'admin')
+    store.publish(draft,'admin',initial)
+    assert store.snapshot(initial)[1]['rules'][0]['action']=='MASK'
+    assert store.snapshot()[1]['rules'][0]['action']=='BLOCK'

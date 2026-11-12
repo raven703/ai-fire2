@@ -39,6 +39,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile.vault-v2
     environment:
+      MASK_ATTESTATION_KEY_FILE: /run/secrets/mask-attestation
+      DLP_REAL_DATA_ENABLED: 'false'
       PG_PASSWORD_FILE: /run/secrets/pg-password
       BAO_TOKEN_FILE: /run/secrets/bao-encrypt
       BAO_DECRYPT_TOKEN_FILE: /run/secrets/bao-decrypt
@@ -46,6 +48,7 @@ services:
       VAULT_REVEAL_KEY_FILE: /run/secrets/reveal-key
       BAO_URL: http://openbao:8200
     volumes:
+      - ./artifacts/vault-v2-secrets/mask-attestation:/run/secrets/mask-attestation:ro
       - ./artifacts/vault-v2-secrets/pg-password:/run/secrets/pg-password:ro
       - ./artifacts/vault-v2-secrets/vault-encrypt:/run/secrets/bao-encrypt:ro
       - ./artifacts/vault-v2-secrets/vault-decrypt:/run/secrets/bao-decrypt:ro

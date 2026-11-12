@@ -39,7 +39,9 @@ async def policy_manager(data:dict,user=Depends(get_verified_user)):
                 headers={'Authorization':'Bearer '+os.environ['STORE_KEY']},
                 json={**data,'actor':user.id})
         if response.status_code!=200: raise HTTPException(response.status_code,'policy_operation_denied')
-        return response.json()
+        result=response.json()
+        result['can_edit']=user.role=='admin'
+        return result
     except httpx.HTTPError: raise HTTPException(503,'policy_service_unavailable') from None
 
 
@@ -173,6 +175,7 @@ async def turn(body: Turn, user=Depends(get_verified_user)):
         title = re.sub(r'\[V2_[^\]]+\]', '[ПДн]', body.content)
         title = ' '.join(title.split())[:72] or 'Защищённый чат'
         message = {'id': body.message_id, 'parentId': None, 'childrenIds': [],
+                   'dlp_policy_revision':check.policy_revision,
                    'role': 'user', 'content': body.content, 'models': ['mock']}
         state = await Chats.insert_new_chat(cid, user.id, ChatForm(chat={
             'title': title, 'models': ['mock'],

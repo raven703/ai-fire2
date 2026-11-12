@@ -17,6 +17,7 @@ class NativeInspector:
         self.service_key = service_key
         self.receipts = Admission(admission_key.encode(), 'synthetic-v2')
         self.transport = transport
+        self.policy_revision = None
 
     async def inspect(self, fields, user, chat, operation, revision, *, receipt=False):
         correlation=uuid4().hex
@@ -27,6 +28,7 @@ class NativeInspector:
             async with httpx.AsyncClient(timeout=10, trust_env=False, transport=self.transport) as client:
                 response = await client.post(self.url + '/native/inspect', json=payload,
                                              headers={'Authorization': 'Bearer ' + self.service_key,
+                                                      'X-Policy-Revision': self.policy_revision or '',
                                                       'X-Correlation-ID': correlation})
             status=response.status_code
             if response.status_code != 200:
@@ -36,6 +38,10 @@ class NativeInspector:
                     if verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
                 raise HTTPException(403 if response.status_code == 403 else 503, 'native_inspection_denied')
             result = response.json()
+            policy_revision=result.get('policy_revision')
+            if self.policy_revision and policy_revision!=self.policy_revision:
+                raise ValueError('policy_revision_changed')
+            if policy_revision: self.policy_revision=policy_revision
             approved = result['payload']
             if (set(approved) != set(payload)
                     or any(approved[k] != payload[k] for k in payload if k != 'fields')

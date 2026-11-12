@@ -1,5 +1,12 @@
 # Explicit fictional-fixture migration contour, not general real-PII enablement.
 services:
+  pii:
+    environment:
+      MASK_ATTESTATION_KEY_FILE: /run/secrets/mask-attestation
+      # Operator may enable only in an isolated, synthetic-only exercise.
+      DLP_SYNTHETIC_EXERCISE: ${DLP_SYNTHETIC_EXERCISE:-false}
+    volumes:
+      - ./artifacts/vault-v2-secrets/mask-attestation:/run/secrets/mask-attestation:ro
   gateway:
     environment:
       VAULT_V2_URL: http://vault-v2:8000
