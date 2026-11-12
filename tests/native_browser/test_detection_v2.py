@@ -22,6 +22,8 @@ def test_detection_v2_original_ui(case):
     with sync_playwright() as p:
         browser=p.chromium.launch(args=['--disable-dev-shm-usage'])
         page=browser.new_page()
+        page.set_default_timeout(15000)
+        page.set_default_navigation_timeout(20000)
         page.goto('http://webui:8080/auth',wait_until='domcontentloaded')
         page.locator('input[name=email]').fill(identity['email'])
         page.locator('input[type=password]').first.fill(identity['password'])
@@ -43,7 +45,7 @@ def test_detection_v2_original_ui(case):
                 page.get_by_role('button',name='Показать оригинал',exact=True).first.click()
                 expect(page.get_by_test_id('revealed-original')).to_be_visible()
                 original=page.get_by_test_id('revealed-original').inner_text()
-                composer.fill('Продолжи проверку')
+                composer.fill('Продолжим разговор')
                 with page.expect_response(lambda r:'/api/chat/completions/native' in r.url,timeout=90000) as continued:
                     composer.press('Enter')
                 assert continued.value.status==200,continued.value.text()

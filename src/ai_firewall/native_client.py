@@ -1,5 +1,8 @@
 """Backend-only native admission client. Never accepts a browser-issued permit."""
 import hashlib
+import logging
+import time
+from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException
@@ -16,11 +19,16 @@ class NativeInspector:
         self.transport = transport
 
     async def inspect(self, fields, user, chat, operation, revision, *, receipt=False):
+        correlation=uuid4().hex
+        started=time.monotonic()
+        status=503
         payload = dict(fields=fields, user=user, chat=chat, operation=operation, revision=revision)
         try:
             async with httpx.AsyncClient(timeout=10, trust_env=False, transport=self.transport) as client:
                 response = await client.post(self.url + '/native/inspect', json=payload,
-                                             headers={'Authorization': 'Bearer ' + self.service_key})
+                                             headers={'Authorization': 'Bearer ' + self.service_key,
+                                                      'X-Correlation-ID': correlation})
+            status=response.status_code
             if response.status_code != 200:
                 if response.status_code == 403:
                     try: verdict = response.json().get('detail')
@@ -41,6 +49,10 @@ class NativeInspector:
             raise
         except Exception:
             raise HTTPException(503, 'native_inspection_unavailable') from None
+        finally:
+            logging.getLogger('uvicorn.error').warning(
+                'dlp_trace correlation=%s stage=%s status=%s duration_ms=%s source=gateway',
+                correlation,operation,status,round((time.monotonic()-started)*1000))
 
 
 def revision(value):

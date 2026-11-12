@@ -6,6 +6,7 @@ carry matched plaintext. Adapters must load provisioned local models only.
 from dataclasses import dataclass
 from enum import Enum
 import math
+import re
 from typing import Protocol, Sequence
 
 
@@ -70,6 +71,10 @@ class DetectorPipeline:
         if not isinstance(text, str):
             raise TypeError('text_required')
         results = []
+        # Opaque Vault identifiers can contain digit runs that pass Luhn. Never
+        # interpret their random payload as a new personal-data value. Only the
+        # exact canonical token grammar is opaque; surrounding text is inspected.
+        opaque = [(m.start(), m.end()) for m in re.finditer(r'\[V2_[a-f0-9]{64}\]', text)]
         try:
             for detector in self.detectors:
                 findings = detector.detect(text, language=language)
@@ -77,6 +82,8 @@ class DetectorPipeline:
                     if finding.source != detector.name:
                         raise ValueError('detector_source_mismatch')
                     finding.validate(len(text))
+                    if any(start <= finding.start and finding.end <= end for start,end in opaque):
+                        continue
                     results.append(finding)
             return resolve_overlaps(results, len(text))
         except Exception:

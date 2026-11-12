@@ -1,5 +1,30 @@
 # DLP Detection Engine v2 verification
 
+## MASK/reveal continuation root cause and fix
+
+Canonical random V2 tokens sometimes contain digit substrings passing Luhn.
+Reproduction: repeated first/second Native turns failed on iteration 15;
+direct opaque-token NLP probe returned MASK/CREDIT_CARD. Gateway then attempted
+to store a token substring, rejected by synthetic Vault membership, surfacing
+native_inspection_denied. Fix: suppress findings wholly inside exact canonical
+`[V2_[a-f0-9]{64}]` ranges only. Surrounding text and malformed tokens still scan.
+No timeout increased, writer permits and Vault checks retained.
+
+Deployed updated NLP and incremental Native backend. Native inspector logs only
+generated correlation ID, operation, status, duration and gateway source.
+Correlation header propagated to Gateway; full distributed tracing not claimed.
+
+Actual standalone Chromium: **PASS** login, specified INN MASK, reveal, exact
+second message “Продолжим разговор”, successful completion, Mock original absence,
+reload with no displayed original. This run used bounded Playwright operations.
+Pytest multi-case runner still stalls and was stopped: unresolved test harness
+hang, not claimed fixed. New per-operation bounds alone did not solve it.
+
+Targeted regression: **22 passed** including opaque-token and detector units.
+Full regression attempt: **103 passed, 1 failed**, global Mock capture mismatch;
+concurrent leftover runner may have interfered, root cause not established.
+Policy Manager remains NOT IMPLEMENTED; no claim of completion.
+
 ## Latest integration attempt
 
 Nonbrowser regression rerun: **103 passed**, 10.39 seconds, one dependency
