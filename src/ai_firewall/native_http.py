@@ -3,6 +3,9 @@
 Registration does not open the outer native runtime allowlist.
 """
 import os
+import re
+from pathlib import Path
+import httpx
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +21,40 @@ from ai_firewall.native_lifecycle import append_message, complete_chat
 from ai_firewall.native_writer import inspected_flush
 
 router = APIRouter()
+
+
+class Reveal(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    message_id: str
+    revision: str
+
+
+@router.post('/api/v1/chats/{chat_id}/native/reveal')
+async def reveal_message(chat_id: str, body: Reveal, user=Depends(get_verified_user)):
+    valid_id(chat_id); valid_id(body.message_id)
+    if not os.getenv('VAULT_V2_URL'): raise HTTPException(503, 'reveal_disabled')
+    state = await Chats.get_chat_by_id(chat_id)
+    if state is None or state.user_id != user.id: raise HTTPException(404, 'native_chat_not_found')
+    if revision(state.chat) != body.revision: raise HTTPException(409, 'native_revision_conflict')
+    message = state.chat.get('history', {}).get('messages', {}).get(body.message_id)
+    if message is None: raise HTTPException(404, 'native_message_not_found')
+    content = message['content']
+    tokens = sorted(set(re.findall(r'\[V2_[a-f0-9]{64}\]', content)))
+    if not tokens: raise HTTPException(404, 'no_reveal_tokens')
+    try:
+        async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
+            response = await client.post(os.environ['VAULT_V2_URL'] + '/reveal',
+                headers={'Authorization': 'Bearer ' + Path(os.environ['VAULT_V2_REVEAL_KEY_FILE']).read_text().strip()},
+                json={'tenant': 'synthetic', 'user': user.id, 'chat': chat_id, 'tokens': tokens})
+        if response.status_code == 404: raise HTTPException(404, 'mapping_unavailable')
+        response.raise_for_status()
+        values = response.json()['values']
+        if set(values) != set(tokens): raise ValueError()
+        for token in tokens: content = content.replace(token, values[token])
+        # No mutation, ORM write, admission or model context from this route.
+        return {'content': content}
+    except HTTPException: raise
+    except Exception: raise HTTPException(503, 'reveal_unavailable') from None
 
 
 @router.get('/api/v1/chats/{chat_id}')

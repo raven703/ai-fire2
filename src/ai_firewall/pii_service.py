@@ -59,7 +59,8 @@ def inspect(request: Request, data: dict):
                 categories.update(f.entity_type for f in span.findings)
                 # Irreversible, scoped to this result; no original retained anywhere.
                 cleaned[name]=cleaned[name][:span.start]+'[DLP_REDACTED]'+cleaned[name][span.end:]
-        return {'fields':cleaned,'action':action.value,'categories':sorted(categories),'policy_version':policy.version}
+        return {'fields':cleaned,'action':action.value,'categories':sorted(categories),'policy_version':policy.version,
+            'spans':{name:[{'start':s.start,'end':s.end} for s in decision.spans] for name,decision in decisions.items()}}
     except HTTPException: raise
     except Exception: raise HTTPException(503,'mandatory_nlp_failed') from None
 

@@ -1,0 +1,20 @@
+# Explicit fictional-fixture migration contour, not general real-PII enablement.
+services:
+  gateway:
+    environment:
+      VAULT_V2_URL: http://vault-v2:8000
+      VAULT_V2_WRITE_KEY_FILE: /run/secrets/v2-write
+    volumes:
+      - ./artifacts/vault-v2-secrets/write-key:/run/secrets/v2-write:ro
+    networks: [inspection, vault-client]
+  webui:
+    environment:
+      VAULT_V2_URL: http://vault-v2:8000
+      VAULT_V2_REVEAL_KEY_FILE: /run/secrets/v2-reveal
+    volumes:
+      - ./artifacts/vault-v2-secrets/reveal-key:/run/secrets/v2-reveal:ro
+    networks: [edge, inspection, model, vault-client]
+networks:
+  vault-client:
+    external: true
+    name: ai-fire2-vault-v2_client

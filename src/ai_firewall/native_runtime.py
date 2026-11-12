@@ -79,7 +79,8 @@ class StagedNative:
         native_get = (path in {'/api/models/native', '/api/v1/chats/native/list'}
                       or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}(?:/native)?', path))
         native_delete = method == 'DELETE' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}', path)
-        native_post = path == '/api/chat/completions/native'
+        native_post = (path == '/api/chat/completions/native' or
+                       re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/native/reveal', path))
         if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)
                 or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post) or native_delete))):
             return await JSONResponse({'detail': 'native_content_not_accepted'}, status_code=503,

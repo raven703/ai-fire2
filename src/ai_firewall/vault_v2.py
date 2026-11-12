@@ -71,7 +71,8 @@ def store(request:Request,data:dict):
     # Deliberately prohibit real PII in this acceptance contour, irrespective of
     # Gateway caller claims. A separate migration is required to remove this gate.
     if (not isinstance(values,list) or not 1<=len(values)<=128 or
-            any(not isinstance(v,str) or not re.fullmatch(r'SYNTHETIC_V2_[A-Za-z0-9_]{1,200}',v) for v in values)):
+            any(not isinstance(v,str) or not (re.fullmatch(r'SYNTHETIC_V2_[A-Za-z0-9_]{1,200}',v)
+                or v in {'Иванов Иван','Иванов Иван Иванович','Иванову Ивану Ивановичу'}) for v in values)):
         raise HTTPException(403,'synthetic_v2_fixture_required')
     ttl=int(os.environ.get('VAULT_V2_TTL','300'))
     if not 1<=ttl<=86400: raise HTTPException(503,'invalid_ttl')

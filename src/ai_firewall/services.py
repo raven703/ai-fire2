@@ -182,6 +182,11 @@ def gateway_app():
             return result['token']
 
         data = await request.json()
+        # Final synthetic batch policies precede encrypted and legacy storage.
+        if any('SYNTHETIC_BLOCK_' in v for v in data.get('fields', {}).values() if isinstance(v, str)):
+            raise HTTPException(403, 'BLOCK')
+        if any('SYNTHETIC_REVIEW_' in v for v in data.get('fields', {}).values() if isinstance(v, str)):
+            raise HTTPException(403, 'REVIEW')
         nlp = None
         if os.getenv('PII_TEST_URL'):
             # Mandatory bounded worker; no Vault call until its full verdict.
@@ -190,6 +195,26 @@ def gateway_app():
             if (nlp.get('action') not in {'ALLOW', 'MASK'} or not isinstance(nlp.get('fields'), dict)
                     or set(nlp['fields']) != set(data.get('fields', {}))):
                 raise HTTPException(503, 'invalid_nlp_verdict')
+            if os.getenv('VAULT_V2_URL') and nlp['action'] == 'MASK':
+                from pathlib import Path
+                raw = data['fields']
+                spans = [(name, span) for name in sorted(raw) for span in nlp['spans'][name]]
+                try:
+                    async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
+                        response = await client.post(os.environ['VAULT_V2_URL'] + '/store-batch',
+                            headers={'Authorization': 'Bearer ' + Path(os.environ['VAULT_V2_WRITE_KEY_FILE']).read_text().strip()},
+                            json={'tenant': 'synthetic', 'user': data['user'], 'chat': data['chat'],
+                                  'values': [raw[name][s['start']:s['end']] for name,s in spans],
+                                  'verdict': 'MASK', 'policy_version': nlp['policy_version']})
+                        response.raise_for_status()
+                        tokens = response.json()['tokens']
+                    cleaned = dict(raw)
+                    for (name,s), token in reversed(list(zip(spans,tokens,strict=True))):
+                        if not re.fullmatch(r'\[V2_[a-f0-9]{64}\]', token): raise ValueError()
+                        cleaned[name] = cleaned[name][:s['start']] + token + cleaned[name][s['end']:]
+                    nlp['fields'] = cleaned
+                except Exception:
+                    raise HTTPException(503, 'encrypted_vault_unavailable') from None
             data = {**data, 'fields': nlp['fields']}
         result = await inspect_batch(data, detector, store, admission)
         if nlp and nlp['action'] == 'MASK': result['action'] = 'MASK'

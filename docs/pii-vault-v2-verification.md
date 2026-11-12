@@ -3,6 +3,43 @@
 Status: **partial implementation, not migration/security acceptance**. Native
 runtime remains unchanged on its synthetic-only Vault; no real PII enabled.
 
+## Reversible Native integration update
+
+Checkpoint commits: main `dac56ca`, fork `6bee48116`. Subsequent changes now
+deploy reversible MASK through the existing Native Gateway using explicit
+`compose.native-vault-v2.yaml` overlay. NLP returns offset-only spans after its
+full verdict. Synthetic BLOCK/REVIEW checked before any encrypted writes. Original
+span values go only to encrypted Vault; legacy synthetic Vault remains for its
+existing synthetic markers, never new real categories. Vault permits only the
+explicit fictional names `Иванов Иван`, `Иванов Иван Иванович`,
+`Иванову Ивану Ивановичу` and SYNTHETIC_V2 fixtures. Other detected values deny
+in this contour. This is not general real-PII enablement.
+
+Original UserMessage component now has “Показать оригинал” / “Скрыть оригинал”.
+Reveal route authenticates upstream user, checks owner, message ID, revision,
+tenant/user/chat scope and Vault TTL. Plaintext is rendered as escaped text in
+component-local RAM, never assigned to history/message/composer. Reload clears
+reveal. Response is no-store. A fresh authenticated HTTP request is required,
+not a fresh password/step-up authentication. Automatic timed hide is not implemented.
+
+Actual Chromium against rebuilt original UI: **PASS** fictional FIO → V2 token,
+Mock response, button reveal, continued masked model history, reload masked,
+stale revision denial, local/session storage and WebUI logical DB original absence.
+Evidence `artifacts/v2-reveal-browser.log`, `artifacts/vault-v2-reveal-reload.png`.
+Complete browser suite **8 passed, 3 skipped**; full nonbrowser suite **100 passed**.
+Build watchdog exit 0, no pressure cancellation. POC restored, volumes preserved.
+
+Additional lifecycle test: **PASS** 12 concurrent stores use one token/row;
+expired timestamp denies reveal and next store replaces token. This is a forced
+expiry test, NOT a real waiting TTL test. Backup/restore, restart/unseal, rotation,
+dependency outage E2E, foreign-user Native reveal, PostgreSQL/WAL/log sweeps and
+full browser persistent-storage inventory after reveal remain NOT TESTED.
+**Vault v2 is integrated but not fully security-accepted or complete.**
+
+Current deployment adds `-f compose.native-vault-v2.yaml` after the native/core/pii
+compose files. Reverting that overlay returns the irreversible detector test mode.
+Historical statuses below are superseded only by explicit results above.
+
 ## Latest containment and UI verification
 
 Root disclosure source: subprocess.CalledProcessError included argv containing
