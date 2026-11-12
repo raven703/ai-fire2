@@ -12,7 +12,7 @@ def test_vault_v2_reversible_native():
     original='Иванов Иван'
     control=httpx.Client(base_url='http://mock:8000',headers={'Authorization':'Bearer '+os.environ['TEST_KEY']})
     with sync_playwright() as pw:
-        browser=pw.chromium.launch(args=['--disable-dev-shm-usage'])
+        browser=pw.chromium.launch(args=['--disable-dev-shm-usage', '--unsafely-treat-insecure-origin-as-secure=http://webui:8080'])
         page=browser.new_page(viewport={'width':1440,'height':1000})
         page.goto('http://webui:8080/auth')
         page.locator('input[name="email"]').fill(identity['email'])
@@ -38,6 +38,38 @@ def test_vault_v2_reversible_native():
         assert '[V2_' in json.dumps(capture)
         storage=page.evaluate('JSON.stringify({local:{...localStorage},session:{...sessionStorage}})')
         assert original not in storage
+        persisted=page.evaluate('''async () => {
+            const records=[];
+            for (const info of await indexedDB.databases()) {
+                const db=await new Promise((resolve,reject)=>{
+                    const request=indexedDB.open(info.name);
+                    request.onsuccess=()=>resolve(request.result);
+                    request.onerror=()=>reject(new Error('IndexedDB inventory failed'));
+                });
+                for (const name of db.objectStoreNames) {
+                    records.push(await new Promise((resolve,reject)=>{
+                        const request=db.transaction(name).objectStore(name).getAll();
+                        request.onsuccess=()=>resolve(request.result);
+                        request.onerror=()=>reject(new Error('IndexedDB read failed'));
+                    }));
+                }
+                db.close();
+            }
+            for (const name of ('caches' in globalThis ? await caches.keys() : [])) {
+                const cache=await caches.open(name);
+                for (const request of await cache.keys()) {
+                    records.push(request.url);
+                    records.push(await (await cache.match(request)).text());
+                }
+            }
+            records.push('serviceWorker' in navigator ? (await navigator.serviceWorker.getRegistrations()).map(r=>r.scope) : []);
+            return JSON.stringify(records);
+        }''')
+        assert original not in persisted
+        for name in ('webui.db','webui.db-wal','webui.db-shm'):
+            path=Path('/webui-data')/name
+            if path.exists():
+                assert original.encode() not in path.read_bytes()
         db=sqlite3.connect('file:/webui-data/webui.db?mode=ro',uri=True)
         assert original not in '\n'.join(db.iterdump()); db.close()
         page.reload(); expect(page.locator('#chat-input')).to_be_visible(timeout=30000)

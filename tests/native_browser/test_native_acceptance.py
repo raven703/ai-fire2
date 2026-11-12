@@ -12,11 +12,8 @@ from playwright.sync_api import sync_playwright, expect
 
 def login(browser, identity):
     context = browser.new_context()
-    # Preserve localhost secure-context APIs while proxying to Docker DNS.
-    context.route('http://localhost:8080/**', lambda route: route.fulfill(
-        response=route.fetch(url=route.request.url.replace('http://localhost:8080', 'http://webui:8080'))))
     page = context.new_page()
-    page.goto('http://localhost:8080/auth')
+    page.goto('http://webui:8080/auth')
     page.locator('input[name="email"]').fill(identity['email'])
     page.locator('input[type="password"]').fill(identity['password'])
     with page.expect_response(lambda r: '/auths/signin' in r.url) as result:
@@ -46,14 +43,16 @@ def storage_snapshot(page):
         }
         result.dbs.push({name:info.name, stores}); db.close();
       }
-      for (const name of await caches.keys()) {
+      result.cacheApiAvailable = 'caches' in globalThis;
+      result.workerApiAvailable = 'serviceWorker' in navigator;
+      for (const name of (result.cacheApiAvailable ? await caches.keys() : [])) {
         const cache=await caches.open(name);
         for (const request of await cache.keys()) {
           const response=await cache.match(request);
           result.caches.push({name, url:request.url, body:await response.text()});
         }
       }
-      for (const reg of await navigator.serviceWorker.getRegistrations()) {
+      for (const reg of (result.workerApiAvailable ? await navigator.serviceWorker.getRegistrations() : [])) {
         result.workers.push({scope:reg.scope, active:reg.active?.scriptURL, waiting:reg.waiting?.scriptURL, installing:reg.installing?.scriptURL});
       }
       return result;
