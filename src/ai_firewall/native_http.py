@@ -54,6 +54,21 @@ async def turn(body: Turn, user=Depends(get_verified_user)):
     if os.environ.get('FIREWALL_NATIVE_WRITERS') != 'true':
         raise HTTPException(503, 'native_writer_disabled')
     check = inspector()
+    debug = None
+    new_chat_id = str(uuid4())
+    if os.getenv('DLP_DEBUG_TEST_ONLY') == 'true':
+        await Chats.require_chat_creation_permission(user.id)
+        # Inspect raw turn before canonical storage discards its detection evidence.
+        # The response remains backend-local; no metadata is put into the prompt.
+        scope = body.chat_id or new_chat_id
+        if body.chat_id:
+            valid_id(body.chat_id)
+            owned = await Chats.get_chat_by_id(body.chat_id)
+            if owned is None or owned.user_id != user.id:
+                raise HTTPException(404, 'native_chat_not_found')
+        debug = await check.inspect({'content': body.content}, user.id, scope,
+            'input', revision({}), receipt=True)
+        body.content = debug['payload']['fields']['content']
     if body.chat_id:
         valid_id(body.chat_id)
         await Chats.require_chat_creation_permission(user.id)
@@ -62,7 +77,7 @@ async def turn(body: Turn, user=Depends(get_verified_user)):
     else:
         if body.parent_id is not None:
             raise HTTPException(400, 'native_new_chat_scope_invalid')
-        cid = str(uuid4())
+        cid = new_chat_id
         message = {'id': body.message_id, 'parentId': None, 'childrenIds': [],
                    'role': 'user', 'content': body.content, 'models': ['mock']}
         state = await Chats.insert_new_chat(cid, user.id, ChatForm(chat={
@@ -71,7 +86,7 @@ async def turn(body: Turn, user=Depends(get_verified_user)):
         }))
     try:
         state = await complete_chat(AsyncSessionLocal, check, user.id, state.id,
-            revision(state.chat), os.environ['NATIVE_LLM_URL'], os.environ['LITELLM_KEY'])
+            revision(state.chat), os.environ['NATIVE_LLM_URL'], os.environ['LITELLM_KEY'], debug=debug)
         error = None
     except HTTPException as exception:
         # Clean input is committed. Return only this known canonical snapshot,

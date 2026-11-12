@@ -1,0 +1,182 @@
+[
+  {
+    "text": "Тестовый получатель: Иванов Иван Иванович.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 41
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Иванову Ивану Ивановичу.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 44
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Анна-Мария Соколова.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 40
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Пётр Сидоров.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 33
+      }
+    ]
+  },
+  {
+    "text": "Email: robot@example.com",
+    "entities": [
+      {
+        "entity": "EMAIL_ADDRESS",
+        "start": 7,
+        "end": 24
+      }
+    ]
+  },
+  {
+    "text": "Телефон: +7 (999) 123-45-67",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 9,
+        "end": 27
+      }
+    ]
+  },
+  {
+    "text": "Телефон: 8 999 123 45 67",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 9,
+        "end": 24
+      }
+    ]
+  },
+  {
+    "text": "ИНН 7707083893",
+    "entities": [
+      {
+        "entity": "RU_INN",
+        "start": 4,
+        "end": 14
+      }
+    ]
+  },
+  {
+    "text": "ИНН 500100732259",
+    "entities": [
+      {
+        "entity": "RU_INN",
+        "start": 4,
+        "end": 16
+      }
+    ]
+  },
+  {
+    "text": "СНИЛС 112-233-445 95",
+    "entities": [
+      {
+        "entity": "RU_SNILS",
+        "start": 6,
+        "end": 20
+      }
+    ]
+  },
+  {
+    "text": "Паспорт РФ: 45 10 123456",
+    "entities": [
+      {
+        "entity": "RU_PASSPORT",
+        "start": 12,
+        "end": 24
+      }
+    ]
+  },
+  {
+    "text": "Карта: 4111 1111 1111 1111",
+    "entities": [
+      {
+        "entity": "CREDIT_CARD",
+        "start": 7,
+        "end": 26
+      }
+    ]
+  },
+  {
+    "text": "IP 192.0.2.10",
+    "entities": [
+      {
+        "entity": "IP_ADDRESS",
+        "start": 3,
+        "end": 13
+      }
+    ]
+  },
+  {
+    "text": "БИК 044525225",
+    "entities": [
+      {
+        "entity": "RU_BIC",
+        "start": 4,
+        "end": 13
+      }
+    ]
+  },
+  {
+    "text": "Заказ 4510 123456",
+    "entities": []
+  },
+  {
+    "text": "ИНН 7707083894",
+    "entities": []
+  },
+  {
+    "text": "СНИЛС 112-233-445 96",
+    "entities": []
+  },
+  {
+    "text": "Сумма 1234567890 рублей",
+    "entities": []
+  },
+  {
+    "text": "Карта 4111 1111 1111 1112",
+    "entities": []
+  },
+  {
+    "text": "Добрый день, это тест.",
+    "entities": []
+  },
+  {
+    "text": "Номер задачи 12345",
+    "entities": []
+  },
+  {
+    "text": "ИНН 77O7083893",
+    "entities": []
+  },
+  {
+    "text": "Email отсутствует",
+    "entities": []
+  },
+  {
+    "text": "😀 Контрольная строка",
+    "entities": []
+  }
+]

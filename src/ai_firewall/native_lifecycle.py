@@ -1,6 +1,7 @@
 """Locked native text append; deliberately not exposed as an HTTP endpoint."""
 from copy import deepcopy
 import time
+import os
 from uuid import UUID
 import httpx
 
@@ -80,7 +81,7 @@ async def append_message(sessions, inspector, user, chat_id, expected_revision,
 
 
 async def complete_chat(sessions, inspector, user, chat_id, expected_revision,
-                        llm_url, llm_key):
+                        llm_url, llm_key, *, debug=None):
     """Nonstream completion from committed history, checked before any write.
 
     LLM failure leaves the already-committed clean input intact. A concurrent
@@ -128,6 +129,25 @@ async def complete_chat(sessions, inspector, user, chat_id, expected_revision,
         if message.get('role') != 'assistant' or message.get('tool_calls') or not isinstance(message.get('content'), str):
             raise ValueError()
         content = message['content']
+        if debug is not None and os.getenv('DLP_DEBUG_TEST_ONLY') == 'true':
+            # Even a discarded provider output must pass mandatory output DLP.
+            checked = await inspector.inspect({'content': content}, user, chat_id, 'output', expected_revision)
+            content = checked['content']
+            async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+                mode = await client.get(os.environ['NATIVE_MOCK_TEST_URL'] + '/test/scenario',
+                    headers={'Authorization': 'Bearer ' + os.environ['TEST_KEY']})
+                mode.raise_for_status()
+            if mode.json()['scenario'] == 'dlp-debug':
+                action = debug['action']
+                categories = debug.get('categories', [])
+                content = ('Получен запрос: «' + chain[-1]['content'] + '».\n'
+                    'Результат DLP: ' + action + '.\n'
+                    'ПДн обнаружены: ' + ('ДА' if action == 'MASK' else 'НЕТ') + '.\n'
+                    'Категории: ' + (', '.join(categories) or 'нет') + '.\n'
+                    'Передано модели: ' + ('только замаскированное сообщение; исходные значения — нет.'
+                        if action == 'MASK' else 'проверенное сообщение.'))
+    except HTTPException:
+        raise
     except Exception:
         # Never propagate provider response bodies or payload-bearing exceptions.
         raise HTTPException(503, 'native_model_failed') from None

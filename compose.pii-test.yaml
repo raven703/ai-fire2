@@ -1,0 +1,38 @@
+# Explicit isolated test deployment. No real-PII Vault support is introduced.
+services:
+  pii:
+    image: ai-fire2-pii:v1
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.pii
+    command: [uvicorn, ai_firewall.pii_service:app, --host, 0.0.0.0, --port, '8000', --no-access-log, --log-level, critical]
+    environment:
+      PII_TEST_ONLY: 'true'
+      NATIVE_GATEWAY_KEY: ${STORE_KEY:?required}
+      PII_MODEL_FAILURE: ${PII_MODEL_FAILURE:-0}
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 64
+    networks: [inspection]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+  gateway:
+    environment:
+      PII_TEST_URL: http://pii:8000
+    depends_on:
+      pii:
+        condition: service_healthy
+  mock:
+    environment:
+      DLP_DEBUG_TEST_ONLY: 'true'
+  webui:
+    environment:
+      DLP_DEBUG_TEST_ONLY: 'true'
+      NATIVE_MOCK_TEST_URL: http://mock:8000
+      TEST_KEY: ${TEST_KEY:?required}
+    networks: [edge, inspection, model]

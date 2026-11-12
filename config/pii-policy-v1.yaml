@@ -1,0 +1,20 @@
+version: synthetic-evaluation-v1
+rules:
+  - {entity: PERSON, action: MASK, threshold: 0.5}
+  - {entity: ORGANIZATION, action: ALLOW, threshold: 0.5}
+  - {entity: LOCATION, action: ALLOW, threshold: 0.5}
+  - {entity: EMAIL_ADDRESS, action: MASK, threshold: 0.5}
+  - {entity: PHONE_NUMBER, action: MASK, threshold: 0.5}
+  - {entity: CREDIT_CARD, action: MASK, threshold: 0.5}
+  - {entity: IP_ADDRESS, action: MASK, threshold: 0.5}
+  - {entity: RU_INN, action: MASK, threshold: 0.5}
+  - {entity: RU_SNILS, action: MASK, threshold: 0.5}
+  - {entity: RU_PASSPORT, action: MASK, threshold: 0.5}
+  - {entity: RU_BIC, action: MASK, threshold: 0.5}
+  - {entity: RU_BANK_ACCOUNT, action: MASK, threshold: 0.5}
+  - {entity: CORPORATE_SECRET, action: BLOCK, threshold: 0.5}
+  - {entity: APPROVAL_REQUIRED, action: REVIEW, threshold: 0.5}
+dictionaries:
+  CORPORATE_SECRET: [SYNTHETIC_CORPORATE_SECRET]
+regex:
+  - {entity: APPROVAL_REQUIRED, pattern: 'SYNTHETIC_REVIEW_[A-Z0-9]+'}

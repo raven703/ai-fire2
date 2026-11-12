@@ -1,0 +1,3 @@
+# Reuse the verified original UI; backend-only incremental build.
+FROM ai-fire2-native:source
+COPY src/ai_firewall /app/backend/ai_firewall

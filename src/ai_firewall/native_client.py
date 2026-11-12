@@ -22,6 +22,10 @@ class NativeInspector:
                 response = await client.post(self.url + '/native/inspect', json=payload,
                                              headers={'Authorization': 'Bearer ' + self.service_key})
             if response.status_code != 200:
+                if response.status_code == 403:
+                    try: verdict = response.json().get('detail')
+                    except Exception: verdict = None
+                    if verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
                 raise HTTPException(403 if response.status_code == 403 else 503, 'native_inspection_denied')
             result = response.json()
             approved = result['payload']

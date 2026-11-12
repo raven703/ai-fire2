@@ -35,6 +35,9 @@ async def call(url, data, secret, method='POST'):
             response = await client.request(method, url, json=data if method == 'POST' else None,
                                             headers={'Authorization': 'Bearer ' + key(secret)})
         if response.status_code >= 400:
+            if response.status_code == 403 and url.endswith('/inspect'):
+                verdict = response.json().get('detail')
+                if verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
             status = response.status_code if response.status_code in {403, 404, 409} else 502
             raise HTTPException(status, 'dependency_denied')
         return response.json()
@@ -53,6 +56,7 @@ def mock_app():
     app = FastAPI()
     state = {'scenario': os.getenv('MOCK_SCENARIO', 'echo'), 'last': None}
     scenarios = {'normal', 'echo', 'template', 'leak', 'injection', 'error', 'timeout'}
+    if os.getenv('DLP_DEBUG_TEST_ONLY') == 'true': scenarios.add('dlp-debug')
 
     @app.get('/health')
     async def health():
@@ -76,6 +80,11 @@ def mock_app():
     async def last(request: Request):
         auth(request, 'TEST_KEY')
         return {'messages': state['last']}
+
+    @app.get('/test/scenario')
+    async def get_scenario(request: Request):
+        auth(request, 'TEST_KEY')
+        return {'scenario': state['scenario']}
 
     @app.post('/v1/chat/completions')
     async def completion(request: Request):
@@ -172,7 +181,22 @@ def gateway_app():
                                 {'value': value, 'user': user, 'chat': chat}, 'VAULT_KEY')
             return result['token']
 
-        return await inspect_batch(await request.json(), detector, store, admission)
+        data = await request.json()
+        nlp = None
+        if os.getenv('PII_TEST_URL'):
+            # Mandatory bounded worker; no Vault call until its full verdict.
+            nlp = await call(os.environ['PII_TEST_URL'] + '/inspect',
+                {'fields': data.get('fields'), 'operation': data.get('operation')}, 'NATIVE_GATEWAY_KEY')
+            if (nlp.get('action') not in {'ALLOW', 'MASK'} or not isinstance(nlp.get('fields'), dict)
+                    or set(nlp['fields']) != set(data.get('fields', {}))):
+                raise HTTPException(503, 'invalid_nlp_verdict')
+            data = {**data, 'fields': nlp['fields']}
+        result = await inspect_batch(data, detector, store, admission)
+        if nlp and nlp['action'] == 'MASK': result['action'] = 'MASK'
+        result['categories'] = sorted(set((nlp['categories'] if nlp else []) +
+            (['SYNTHETIC_PII'] if result['action'] == 'MASK' and not (nlp and nlp['categories']) else [])))
+        result['policy_version'] = nlp['policy_version'] if nlp else 'synthetic-v2'
+        return result
 
     async def scan(text, user, chat):
         try:

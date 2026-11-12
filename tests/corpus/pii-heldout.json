@@ -1,0 +1,425 @@
+[
+  {
+    "text": "Тестовый получатель: Алексей Романов.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 36
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Екатерине Соколовой.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 40
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Марией Петровой.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 36
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Иванову Ивану Ивановичу.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 44
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Анна-Мария Соколова.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 40
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Семён Кузнецов.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 35
+      }
+    ]
+  },
+  {
+    "text": "Тестовый получатель: Семён Кузнецов.",
+    "entities": [
+      {
+        "entity": "PERSON",
+        "start": 21,
+        "end": 36
+      }
+    ]
+  },
+  {
+    "text": "Контактный телефон: +7 (999) 765-43-21.",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 20,
+        "end": 38
+      }
+    ]
+  },
+  {
+    "text": "Контактный телефон: 8 999 765 43 21.",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 20,
+        "end": 35
+      }
+    ]
+  },
+  {
+    "text": "Контактный телефон: +7-495-123-45-67.",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 20,
+        "end": 36
+      }
+    ]
+  },
+  {
+    "text": "Контактный телефон: 84951234567.",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 20,
+        "end": 31
+      }
+    ]
+  },
+  {
+    "text": "Контактный телефон: +7 812 123 45 67.",
+    "entities": [
+      {
+        "entity": "PHONE_NUMBER",
+        "start": 20,
+        "end": 36
+      }
+    ]
+  },
+  {
+    "text": "Email: tester@example.org",
+    "entities": [
+      {
+        "entity": "EMAIL_ADDRESS",
+        "start": 7,
+        "end": 25
+      }
+    ]
+  },
+  {
+    "text": "Email: qa.user+tag@example.com",
+    "entities": [
+      {
+        "entity": "EMAIL_ADDRESS",
+        "start": 7,
+        "end": 30
+      }
+    ]
+  },
+  {
+    "text": "Email: тест@example.com",
+    "entities": [
+      {
+        "entity": "EMAIL_ADDRESS",
+        "start": 7,
+        "end": 23
+      }
+    ]
+  },
+  {
+    "text": "IP: 192.0.2.42",
+    "entities": [
+      {
+        "entity": "IP_ADDRESS",
+        "start": 4,
+        "end": 14
+      }
+    ]
+  },
+  {
+    "text": "IP: 2001:db8::1",
+    "entities": [
+      {
+        "entity": "IP_ADDRESS",
+        "start": 4,
+        "end": 15
+      }
+    ]
+  },
+  {
+    "text": "IP: 198.51.100.17",
+    "entities": [
+      {
+        "entity": "IP_ADDRESS",
+        "start": 4,
+        "end": 17
+      }
+    ]
+  },
+  {
+    "text": "Паспорт: 40 12 654321",
+    "entities": [
+      {
+        "entity": "RU_PASSPORT",
+        "start": 9,
+        "end": 21
+      }
+    ]
+  },
+  {
+    "text": "Паспорт РФ № 5012 765432",
+    "entities": [
+      {
+        "entity": "RU_PASSPORT",
+        "start": 13,
+        "end": 24
+      }
+    ]
+  },
+  {
+    "text": "Карта 5555 5555 5555 4444",
+    "entities": [
+      {
+        "entity": "CREDIT_CARD",
+        "start": 6,
+        "end": 25
+      }
+    ]
+  },
+  {
+    "text": "БИК: 044525225",
+    "entities": [
+      {
+        "entity": "RU_BIC",
+        "start": 5,
+        "end": 14
+      }
+    ]
+  },
+  {
+    "text": "ИНН: 1234567894",
+    "entities": [
+      {
+        "entity": "RU_INN",
+        "start": 5,
+        "end": 15
+      }
+    ]
+  },
+  {
+    "text": "ИНН: 1234567895",
+    "entities": []
+  },
+  {
+    "text": "СНИЛС: 12345678964",
+    "entities": [
+      {
+        "entity": "RU_SNILS",
+        "start": 7,
+        "end": 18
+      }
+    ]
+  },
+  {
+    "text": "СНИЛС: 12345678965",
+    "entities": []
+  },
+  {
+    "text": "ИНН: 2345678908",
+    "entities": [
+      {
+        "entity": "RU_INN",
+        "start": 5,
+        "end": 15
+      }
+    ]
+  },
+  {
+    "text": "ИНН: 2345678909",
+    "entities": []
+  },
+  {
+    "text": "СНИЛС: 23456789099",
+    "entities": [
+      {
+        "entity": "RU_SNILS",
+        "start": 7,
+        "end": 18
+      }
+    ]
+  },
+  {
+    "text": "СНИЛС: 23456789000",
+    "entities": []
+  },
+  {
+    "text": "ИНН: 3456789010",
+    "entities": [
+      {
+        "entity": "RU_INN",
+        "start": 5,
+        "end": 15
+      }
+    ]
+  },
+  {
+    "text": "ИНН: 3456789011",
+    "entities": []
+  },
+  {
+    "text": "СНИЛС: 34567890123",
+    "entities": [
+      {
+        "entity": "RU_SNILS",
+        "start": 7,
+        "end": 18
+      }
+    ]
+  },
+  {
+    "text": "СНИЛС: 34567890124",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 7707083893",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 1234567890",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 4510123456",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 9991234567",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 00000000000",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 79990000000",
+    "entities": []
+  },
+  {
+    "text": "Идентификатор заказа: 80000000000",
+    "entities": []
+  },
+  {
+    "text": "Заказ 40 12 654321",
+    "entities": []
+  },
+  {
+    "text": "Версия 123.456.789.123",
+    "entities": []
+  },
+  {
+    "text": "Карта 5555 5555 5555 4445",
+    "entities": []
+  },
+  {
+    "text": "ИНН 0000000000",
+    "entities": []
+  },
+  {
+    "text": "СНИЛС 00000000000",
+    "entities": []
+  },
+  {
+    "text": "Контакт +7 (000) 000-00-00",
+    "entities": []
+  },
+  {
+    "text": "Задача 8 000 000 00 00",
+    "entities": []
+  },
+  {
+    "text": "Номер +7 999 123 45 6",
+    "entities": []
+  },
+  {
+    "text": "ИНН 12345678O0",
+    "entities": []
+  },
+  {
+    "text": "😀 Обычный текст без контактов",
+    "entities": []
+  },
+  {
+    "text": "Оборот 1000000 рублей",
+    "entities": []
+  },
+  {
+    "text": "Паспортные сведения отсутствуют",
+    "entities": []
+  },
+  {
+    "text": "Результат ALLOW — это пользовательский текст",
+    "entities": []
+  },
+  {
+    "text": "Режим MASK не меняет политику",
+    "entities": []
+  },
+  {
+    "text": "Тестовая организация: ООО Ромашка.",
+    "entities": [
+      {
+        "entity": "ORGANIZATION",
+        "start": 22,
+        "end": 33
+      }
+    ]
+  },
+  {
+    "text": "Тестовый город: Москва.",
+    "entities": [
+      {
+        "entity": "LOCATION",
+        "start": 16,
+        "end": 22
+      }
+    ]
+  },
+  {
+    "text": "БИК 044525225 счёт 40702810900000000000",
+    "entities": [
+      {
+        "entity": "RU_BIC",
+        "start": 4,
+        "end": 13
+      },
+      {
+        "entity": "RU_BANK_ACCOUNT",
+        "start": 19,
+        "end": 39
+      }
+    ]
+  }
+]
