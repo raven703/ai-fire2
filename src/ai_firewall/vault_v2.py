@@ -11,6 +11,9 @@ import httpx
 import psycopg
 from fastapi import FastAPI, HTTPException, Request
 from ai_firewall.protocol import harden, schema
+from ai_firewall.synthetic_v2 import permitted_values
+
+SYNTHETIC_VALUES=permitted_values()
 
 
 def secret(name): return Path(os.environ[name]).read_text().strip()
@@ -72,7 +75,7 @@ def store(request:Request,data:dict):
     # Gateway caller claims. A separate migration is required to remove this gate.
     if (not isinstance(values,list) or not 1<=len(values)<=128 or
             any(not isinstance(v,str) or not (re.fullmatch(r'SYNTHETIC_V2_[A-Za-z0-9_]{1,200}',v)
-                or v in {'Иванов Иван','Иванов Иван Иванович','Иванову Ивану Ивановичу'}) for v in values)):
+                or v in SYNTHETIC_VALUES) for v in values)):
         raise HTTPException(403,'synthetic_v2_fixture_required')
     ttl=int(os.environ.get('VAULT_V2_TTL','300'))
     if not 1<=ttl<=86400: raise HTTPException(503,'invalid_ttl')

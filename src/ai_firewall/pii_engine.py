@@ -133,4 +133,5 @@ def create_pipeline():
         registry.add_recognizer(cls(supported_language='ru'))
     registry.add_recognizer(PhoneRecognizer(supported_language='ru',supported_regions=['RU']))
     analyzer=AnalyzerEngine(nlp_engine=nlp,registry=registry,supported_languages=['ru'])
-    return DetectorPipeline([NormalizedDetector(d) for d in (RussianPresidio(analyzer),NatashaNER(),RussianRecognizer())])
+    from ai_firewall.detection_v2 import ExtendedRecognizer
+    return DetectorPipeline([NormalizedDetector(d) for d in (RussianPresidio(analyzer),NatashaNER(),RussianRecognizer(),ExtendedRecognizer())])

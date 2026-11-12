@@ -14,7 +14,18 @@ rules:
   - {entity: RU_BANK_ACCOUNT, action: MASK, threshold: 0.5}
   - {entity: CORPORATE_SECRET, action: BLOCK, threshold: 0.5}
   - {entity: APPROVAL_REQUIRED, action: REVIEW, threshold: 0.5}
+  - {entity: RU_OGRN, action: MASK, threshold: 0.5}
+  - {entity: RU_OGRNIP, action: MASK, threshold: 0.5}
+  - {entity: DATE_OF_BIRTH, action: MASK, threshold: 0.5}
+  - {entity: POSTAL_ADDRESS, action: MASK, threshold: 0.5}
+  - {entity: API_KEY, action: BLOCK, threshold: 0.5}
+  - {entity: JWT, action: BLOCK, threshold: 0.5}
+  - {entity: BEARER_TOKEN, action: BLOCK, threshold: 0.5}
+  - {entity: PRIVATE_KEY, action: BLOCK, threshold: 0.5}
+  - {entity: PASSWORD, action: BLOCK, threshold: 0.5}
+  - {entity: CONNECTION_STRING, action: BLOCK, threshold: 0.5}
 dictionaries:
-  CORPORATE_SECRET: [SYNTHETIC_CORPORATE_SECRET]
+  CORPORATE_SECRET: [SYNTHETIC_CORPORATE_SECRET, 'Проект Тестовый Сапфир: секретный бюджет', 'КОММЕРЧЕСКАЯ ТАЙНА']
+  APPROVAL_REQUIRED: ['для внутреннего использования', 'предварительные условия договора', 'конфиденциально']
 regex:
   - {entity: APPROVAL_REQUIRED, pattern: 'SYNTHETIC_REVIEW_[A-Z0-9]+'}
