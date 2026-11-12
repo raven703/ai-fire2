@@ -37,11 +37,12 @@ def bao(args, token=None):
 
 def main():
     LAB.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if (LAB / 'init.json').exists():
-        raise RuntimeError('Initialized lab already exists; preserve evidence')
+    initialized_path = LAB / 'init.json'
     for name in ('pg-password', 'write-key', 'reveal-key'):
         path = LAB / name
-        path.write_text(secrets.token_hex(32)); path.chmod(0o600)
+        if not path.exists():
+            path.write_text(secrets.token_hex(32))
+        path.chmod(0o600)
     def mount(name, dest=None):
         return f'{LAB / name}:/run/secrets/{dest or name}:ro'
     services = {
@@ -72,16 +73,19 @@ def main():
     run(['docker','exec','-u','0',PROJECT+'-openbao-1','chown','100:1000','/bao/data'])
     compose('restart','openbao')
     time.sleep(3)
-    initialized = json.loads(bao(['operator','init','-key-shares=1','-key-threshold=1','-format=json']))
+    initialized = (json.loads(initialized_path.read_text()) if initialized_path.exists() else
+        json.loads(bao(['operator','init','-key-shares=1','-key-threshold=1','-format=json'])))
     path=LAB/'init.json'; path.write_text(json.dumps(initialized)); path.chmod(0o600)
     # Unseal share is provided over stdin, never command arguments.
     def unseal():
         run(['docker','exec','-i',PROJECT+'-openbao-1','sh','-c',
-             'export BAO_ADDR=http://127.0.0.1:8200; bao write sys/unseal -'],
+             'export BAO_ADDR=http://127.0.0.1:8200; bao write -format=json sys/unseal -'],
             json.dumps({'key':initialized['unseal_keys_b64'][0]}).encode())
     unseal()
     root=initialized['root_token']
-    bao(['secrets','enable','transit'],root)
+    mounts=json.loads(bao(['secrets','list','-format=json'],root))
+    if 'transit/' not in mounts:
+        bao(['secrets','enable','transit'],root)
     for key in ('pii','lookup'):
         bao(['write','-f','transit/keys/'+key,'type=aes256-gcm96'],root)
     for name,paths in {'encrypt':['encrypt/pii','hmac/lookup'], 'decrypt':['decrypt/pii']}.items():

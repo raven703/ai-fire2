@@ -59,6 +59,7 @@ def test_native_preview_delete_and_no_socket_warning():
             composer.press('Enter')
         third_id=third_turn.value.json()['chat']['id']
         page.get_by_role('button',name='Open Sidebar',exact=True).filter(visible=True).first.click()
+        expect(page.get_by_test_id('chat-list-loading')).to_have_count(0,timeout=15000)
         for selected_id in (next_chat['id'],third_id):
             page.locator(f'[data-sidebar-chat-id="{selected_id}"] [role="checkbox"]').first.click()
         page.get_by_role('button',name='Delete selected chats',exact=True).click()

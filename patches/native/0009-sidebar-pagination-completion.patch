@@ -1,0 +1,102 @@
+From 152b2c4d9d8972f3b76bb651be19354ad66fc68b Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Thu, 12 Nov 2026 14:55:07 +0300
+Subject: [PATCH] Fix reactive completion of sidebar chat pagination
+
+---
+ src/lib/components/layout/Sidebar.svelte | 13 ++++++++-----
+ src/lib/stores/chatList.ts               | 12 +++++++++---
+ 2 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/src/lib/components/layout/Sidebar.svelte b/src/lib/components/layout/Sidebar.svelte
+index 5674ecd41..5b5379c16 100644
+--- a/src/lib/components/layout/Sidebar.svelte
++++ b/src/lib/components/layout/Sidebar.svelte
+@@ -29,7 +29,7 @@
+ 		sidebarWidth
+ 	} from '$lib/stores';
+ 	import {
+-		allLoaded,
++		chatListComplete,
+ 		loadNextChatListPage,
+ 		refreshChatList,
+ 		refreshSidebar,
+@@ -237,7 +237,7 @@
+ 	let chatListLoading = false;
+ 	let chatListReady = false;
+ 	// Read pagination state when the shared list publishes its rows.
+-	$: allChatsLoaded = $chats !== null && allLoaded;
++	$: allChatsLoaded = $chats !== null && $chatListComplete;
+ 
+ 	let showCreateFolderModal = false;
+ 
+@@ -552,9 +552,11 @@
+ 
+ 		chatListLoading = true;
+ 
+-		await loadNextChatListPage(localStorage.token);
+-
+-		chatListLoading = false;
++		try {
++			await loadNextChatListPage(localStorage.token);
++		} finally {
++			chatListLoading = false;
++		}
+ 	};
+ 
+ 	const applyFolderUnreadCounts = (folderUnreadCounts: Record<string, number>) => {
+@@ -1889,6 +1891,7 @@
+ 											}}
+ 										>
+ 											<div
++												data-testid="chat-list-loading"
+ 												class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2"
+ 											>
+ 												<Spinner className=" size-4" />
+diff --git a/src/lib/stores/chatList.ts b/src/lib/stores/chatList.ts
+index ec66b2de6..a84652c2a 100644
+--- a/src/lib/stores/chatList.ts
++++ b/src/lib/stores/chatList.ts
+@@ -16,7 +16,10 @@ export const pinnedChats = readonly(pinnedChatsStore);
+ let currentPage = 1;
+ let paginationReady = false;
+ let requestGeneration = 0;
+-export let allLoaded = false;
++let allLoaded = false;
++export const chatListComplete = writable(false);
++// Keep aligned with GET /api/v1/chats/ (routers/chats.py).
++const CHAT_PAGE_SIZE = 60;
+ let loadingNextPage = false;
+ 
+ type RefreshChatListOptions = {
+@@ -49,7 +52,8 @@ export const refreshChatList = async (
+ 	}
+ 
+ 	currentPage = 1;
+-	allLoaded = nextChats.length === 0;
++	allLoaded = nextChats.length < CHAT_PAGE_SIZE;
++	chatListComplete.set(allLoaded);
+ 	chatsStore.set(nextChats);
+ 
+ 	if (options.clearPinned) {
+@@ -104,7 +108,8 @@ export const loadNextChatListPage = async (token: string = ''): Promise<ChatList
+ 			return { accepted: false, allLoaded };
+ 		}
+ 
+-		allLoaded = nextChats.length === 0;
++		allLoaded = nextChats.length < CHAT_PAGE_SIZE;
++		chatListComplete.set(allLoaded);
+ 		currentPage = nextPage;
+ 
+ 		const existingIds = new Set((get(chatsStore) ?? []).map((chat) => chat.id));
+@@ -163,6 +168,7 @@ export const resetChatListState = () => {
+ 	currentPage = 1;
+ 	paginationReady = false;
+ 	allLoaded = false;
++	chatListComplete.set(false);
+ 	loadingNextPage = false;
+ 	chatsStore.set(null);
+ 	pinnedChatsStore.set([]);
+-- 
+2.34.1
+

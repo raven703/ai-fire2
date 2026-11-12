@@ -1,5 +1,33 @@
 # Vault v2 verification — November 12, 2026
 
+## Deployed visual checkpoint (supersedes build/provisioning failures below)
+
+- Native full build: **PASS**, exit 0, watchdog_stop=False. Started with
+  7239 MiB available and 406 MiB swap used after stopping project containers;
+  no volumes deleted. Previous running containers restored, working OpenBao
+  unsealed with existing recovery material; Native health checked afterwards.
+- Pagination fix deployed and committed in fork `152b2c4d9`.
+- Full Chromium command: `docker compose -f compose.native.yaml run --rm
+  --no-deps browser-tests pytest -q /app/tests`: **8 passed, 3 skipped**,
+  92.29 seconds. Includes absence of trailing list loader, immediate list update,
+  safe title and checkbox multi-delete. Skips are not acceptance passes.
+- Full nonbrowser suite: **101 passed**, 30.19 seconds; one dependency deprecation
+  warning. Evidence: `artifacts/visual-final-{browser,regression}.log`.
+- Isolated runner corrected to resume its own existing lab safely, retaining
+  initialization and credentials. CLI unseal now explicitly requests JSON.
+  `python3 scripts/accept-vault-v2-isolated.py`: **PASS** real four-second TTL
+  (five-second actual wait), tenant/user/chat scope denial; **PASS** isolated
+  PostgreSQL/OpenBao/Vault restart and subsequent unseal/readiness.
+  This does not prove explicit seal command recovery or preservation of a live
+  pre-restart mapping (the test mapping had already expired).
+- Working Native/POC restored. No working mappings/keys rotated or removed.
+  Mock diagnostic mode must be restored after browser tests for visual review.
+
+Security Acceptance remains **INCOMPLETE**: backup/restore, key/credential
+rotation, nine fault scenarios, orphan cleanup, race semantics and comprehensive
+persistence sweeps remain unaccepted. This checkpoint is ready for visual testing,
+not a claim that the full Vault lifecycle/security stage is complete.
+
 ## Security acceptance checkpoint — latest, supersedes historical completion claims
 
 Overall: **NOT ACCEPTED**. Synthetic fixtures only. No new user features.
