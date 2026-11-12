@@ -1,3 +1,46 @@
+# Native Core remaining security acceptance — November 12, 2026
+
+All three previously deferred scenarios passed against the running source fork.
+No chat lifecycle/runtime architecture change or new production dependency was
+needed. Original frontend and DLP enforcement remain unchanged.
+
+1. Two separate Chromium contexts logged in as two provisioned synthetic users
+   with role `user` (not pending). Both created masked chats. Bidirectional
+   foreign history GET and native append returned 404; lists excluded the other
+   chat. Alternative chat/update/view/messages/share POSTs stayed 503. Own read
+   worked and injected client `messages` history was rejected 422. Roles were
+   provisioned explicitly in the local DB; password login remained upstream.
+2. Real Gateway transport outage during OUTPUT: Mock captured a newly inspected
+   request, marker signalled host orchestration, Gateway was SIGKILLed before
+   the delayed Mock response. Result was `native_inspection_unavailable` with
+   exactly one committed user row, no assistant row, no response displayed.
+   Captured model content matched the retained canonical input. The stock 3s
+   LiteLLM timeout first produced a model timeout (not accepted as output proof).
+   A temporary native-only 30s override allowed Mock's 15s delay; base config
+   was restored and Gateway restarted. Reproducer: scripts/verify-native-output-outage.sh.
+3. Both Chromium contexts enumerated all IndexedDB databases/object stores and
+   records, CacheStorage cache URLs/bodies, Service Worker registrations, local
+   and session storage after real masked turns and reload. No raw canaries;
+   no Service Worker registrations. Initial Docker hostname origin did not
+   expose secure-context CacheStorage APIs; final test uses localhost origin
+   routed to native webui, not a skip or unavailable-API fallback.
+
+Normal Chromium suite: 5 passed, 2 skipped (explicit input/output outage tests).
+Output-outage run separately: 1 passed. Existing input-outage coverage remains
+documented above/below. Real-model create/append/completion/direct SQLite and
+AsyncEngine bypass script passed again. Service log sweep found no storage or
+output-transport canaries. Full regression including detector foundation:
+92 passed, 1 skipped (SQLAlchemy absent in regression image; exercised separately
+by actual-model source-image script), one existing dependency warning.
+
+Evidence: native-verified-acceptance.log, native-output-outage.log,
+native-acceptance-browser.log, native-acceptance-regression.log,
+native-acceptance-models.log, native-acceptance-services.log (ignored artifacts).
+Acceptance is for the bounded synthetic-only SQLite nonstream mock text core,
+not arbitrary upstream features or hostile administrator schema/code changes.
+No real-PII readiness claimed. Detector contracts/adapters/tests added separately;
+see docs/pii-detection-engine.md for implementation limits and immediate rollout.
+
 # Layout autosave correction — November 11, 2026
 
 User screenshot exposed an unsupported POST /chats/{id}/view autosave after
