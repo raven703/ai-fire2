@@ -1,0 +1,33 @@
+diff --git a/src/lib/components/ChangelogModal.svelte b/src/lib/components/ChangelogModal.svelte
+index aba3aab8d..1f67df940 100644
+--- a/src/lib/components/ChangelogModal.svelte
++++ b/src/lib/components/ChangelogModal.svelte
+@@ -41,8 +41,13 @@
+ 	const closeModal = async () => {
+ 		localStorage.version = $config.version;
+ 		await settings.set({ ...$settings, ...{ version: $config.version } });
+-		await updateUserSettings(localStorage.token, { ui: { version: $config.version } });
+-		show = false;
++		try {
++			await updateUserSettings(localStorage.token, { ui: { version: $config.version } });
++		} finally {
++			// Protected Native mode intentionally denies the legacy settings writer.
++			// A failed preference save must not trap the user behind this dialog.
++			show = false;
++		}
+ 	};
+ 
+ 	$: if (show) {
+diff --git a/src/routes/(app)/+layout.svelte b/src/routes/(app)/+layout.svelte
+index 57a5dd0aa..060916825 100644
+--- a/src/routes/(app)/+layout.svelte
++++ b/src/routes/(app)/+layout.svelte
+@@ -392,7 +392,7 @@
+ 		};
+ 		setupKeyboardShortcuts();
+ 
+-		if ($user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
++		if (!$config?.features?.native_text_only && $user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
+ 			showChangelog.set($settings?.version !== $config.version);
+ 		}
+ 

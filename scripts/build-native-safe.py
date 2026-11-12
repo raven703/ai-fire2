@@ -25,7 +25,10 @@ def memory():
 
 
 available, swap = memory()
-if available < 7040 or swap > 512:
+starting_swap = swap
+# Cold, inactive swapped pages need not be forcibly paged in before a build.
+# Retain the RAM floor and stop on significant *additional* swapping.
+if available < 7040 or swap > 1024:
     raise SystemExit(f'Unsafe starting pressure: available={available} MiB swap_used={swap} MiB')
 log_path = artifacts / 'native-build-6144-controlled.log'
 with log_path.open('w') as log, (artifacts / 'native-build-6144-memory.csv').open('w') as stats:
@@ -46,7 +49,7 @@ with log_path.open('w') as log, (artifacts / 'native-build-6144-memory.csv').ope
                 stopped = True
                 os.killpg(process.pid, signal.SIGINT)
                 break
-            if available < 1024 or swap > 768:
+            if available < 1024 or swap > min(1536, starting_swap + 256):
                 print(f'STOP resource pressure: available={available} MiB swap_used={swap} MiB', flush=True)
                 stopped = True
                 os.killpg(process.pid, signal.SIGINT)

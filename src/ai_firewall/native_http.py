@@ -36,7 +36,7 @@ async def policy_manager(data:dict,user=Depends(get_verified_user)):
     try:
         async with httpx.AsyncClient(timeout=10,trust_env=False) as client:
             response=await client.post(os.environ['DLP_POLICY_URL']+'/policy-manager',
-                headers={'Authorization':'Bearer '+os.environ['STORE_KEY']},
+                headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY']},
                 json={**data,'actor':user.id})
         if response.status_code!=200: raise HTTPException(response.status_code,'policy_operation_denied')
         result=response.json()

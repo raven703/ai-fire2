@@ -39,6 +39,7 @@ services:
       NATIVE_MOCK_TEST_URL: http://mock:8000
       TEST_KEY: ${TEST_KEY:?required}
       DLP_POLICY_URL: http://pii:8000
+      DLP_AUDITOR_IDS: ${DLP_AUDITOR_IDS:-}
     networks: [edge, inspection, model]
 volumes:
   native-policy-data:

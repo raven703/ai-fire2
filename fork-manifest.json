@@ -5,7 +5,7 @@
   "local_path": "forks/open-webui",
   "development_branch": "firewall/native-core",
   "poc_commit": "eab205a",
-  "fork_commit": "9be874129eaafaeb5c523d08dbe7081104008f79",
+  "fork_commit": "286b859a3d72b71a0e005d34c1d0ab0a73971d16",
   "patch_series": [
     "patches/native/0001-native-core-staged.patch",
     "patches/native/0002-bounded-rollup-build.patch",
@@ -16,7 +16,8 @@
     "patches/native/0007-native-http-only-socket.patch",
     "patches/native/0008-native-reveal-chat-management.patch",
     "patches/native/0009-sidebar-pagination-completion.patch",
-    "patches/native/0010-dlp-policy-manager.patch"
+    "patches/native/0010-dlp-policy-manager.patch",
+    "patches/native/0011-native-changelog-dismissal.patch"
   ],
-  "stage": "policy-manager-partial-integration-not-accepted"
+  "stage": "policy-manager-deployed-synthetic-browser-verified"
 }

@@ -1,0 +1,6 @@
+# Explicit opt-in for isolated artificial-data demonstrations only.
+# Never use this overlay for uncontrolled users or real personal data.
+services:
+  pii:
+    environment:
+      DLP_SYNTHETIC_EXERCISE: 'true'
