@@ -22,7 +22,7 @@ def test_native_multiturn():
         page.locator('input[name="email"]').fill(identity['email'])
         page.locator('input[type="password"]').first.fill(identity['password'])
         page.locator('button[type="submit"]').click()
-        page.wait_for_url('http://webui:8080/', timeout=30000)
+        page.wait_for_url('http://webui:8080/', wait_until='domcontentloaded', timeout=30000)
         page.screenshot(path='/artifacts/native-chat-before.png')
         composer = page.locator('#chat-input')
         expect(composer).to_be_visible(timeout=30000)
@@ -96,7 +96,7 @@ def test_native_model_failure_and_output_block():
                 composer.fill('Safe synthetic fault test')
                 with page.expect_response(lambda r: '/api/chat/completions/native' in r.url, timeout=90000) as turn:
                     composer.press('Enter')
-                assert turn.value.status == 200
+                assert turn.value.status == 200, turn.value.text()
                 result = turn.value.json()
                 messages = result['chat']['chat']['history']['messages']
                 assert len(messages) == (2 if scenario == 'leak' else 1)

@@ -14,7 +14,7 @@ def test_vault_v2_reversible_native():
     with sync_playwright() as pw:
         browser=pw.chromium.launch(args=['--disable-dev-shm-usage', '--unsafely-treat-insecure-origin-as-secure=http://webui:8080'])
         page=browser.new_page(viewport={'width':1440,'height':1000})
-        page.goto('http://webui:8080/auth')
+        page.goto('http://localhost:8080/auth')
         page.locator('input[name="email"]').fill(identity['email'])
         page.locator('input[type="password"]').first.fill(identity['password'])
         page.locator('button[type="submit"]').click()
@@ -39,6 +39,9 @@ def test_vault_v2_reversible_native():
         storage=page.evaluate('JSON.stringify({local:{...localStorage},session:{...sessionStorage}})')
         assert original not in storage
         persisted=page.evaluate('''async () => {
+            if (!isSecureContext || !('caches' in globalThis) || !('serviceWorker' in navigator)) {
+                throw new Error('Secure-context persistence APIs required');
+            }
             const records=[];
             for (const info of await indexedDB.databases()) {
                 const db=await new Promise((resolve,reject)=>{

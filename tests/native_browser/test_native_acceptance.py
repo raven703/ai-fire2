@@ -13,7 +13,7 @@ from playwright.sync_api import sync_playwright, expect
 def login(browser, identity):
     context = browser.new_context()
     page = context.new_page()
-    page.goto('http://webui:8080/auth')
+    page.goto('http://localhost:8080/auth')
     page.locator('input[name="email"]').fill(identity['email'])
     page.locator('input[type="password"]').fill(identity['password'])
     with page.expect_response(lambda r: '/auths/signin' in r.url) as result:
@@ -91,6 +91,7 @@ def test_verified_isolation_and_all_storage():
             page.reload()
             expect(page.locator('#chat-input')).to_be_visible(timeout=30000)
             snapshot=storage_snapshot(page)
+            assert snapshot['cacheApiAvailable'] and snapshot['workerApiAvailable']
             assert not snapshot['workers'], 'No unreviewed Service Worker permitted'
             for canary in canaries:
                 assert canary not in json.dumps(snapshot)

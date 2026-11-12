@@ -120,4 +120,22 @@ def delete(request:Request,data:dict):
     return {'deleted':True}
 
 
+@app.post('/cleanup-expired')
+def cleanup_expired(request:Request,data:dict):
+    """Bounded orphan retention without guessing whether a token is referenced.
+
+    A failed WebUI commit leaves a mapping until its normal expiry. Only already
+    irreversibly expired rows may be reclaimed; shared live tokens are untouched.
+    SKIP LOCKED avoids interfering with concurrent STORE transactions.
+    """
+    authorize(request,'VAULT_WRITE_KEY_FILE')
+    schema(data,set())
+    with connection() as db:
+        rows=db.execute('WITH expired AS (SELECT token FROM mappings WHERE expires<=%s '
+            'ORDER BY expires LIMIT 500 FOR UPDATE SKIP LOCKED) '
+            'DELETE FROM mappings USING expired WHERE mappings.token=expired.token '
+            'RETURNING mappings.token',(int(time.time()),)).fetchall()
+    return {'deleted_count':len(rows)}
+
+
 app=harden(app)

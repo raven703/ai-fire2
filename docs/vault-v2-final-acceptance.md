@@ -1,5 +1,32 @@
 # Vault v2 final acceptance — 2026-11-12
 
+## Latest remaining acceptance execution
+
+- Full Chromium: **8 passed, 3 skipped**, 85.59 s
+  (`artifacts/v2-secure-browser.log`). New chat/ALLOW/MASK included.
+- Removed brittle Playwright HTTP response-rewrite transport. A session TCP
+  forward binds test-container localhost:8080 to webui:8080. Secure-context reveal
+  test requires actual CacheStorage/ServiceWorker APIs; cross-user storage test
+  asserts both available. No API-unavailable-as-PASS fallback for these runs.
+- Navigation waits for DOMContentLoaded rather than all resource completion.
+  Historical 503 **not conclusively diagnosed**: direct error/injection/leak
+  scenarios all returned expected checked responses in 0.28–0.44 s. Clean rerun
+  is evidence of current operation, not proof of historical root cause.
+- Added authenticated `/cleanup-expired`, batch limit 500, SKIP LOCKED. Only
+  expired mappings can be deleted: failed WebUI commits retain mappings until
+  TTL, preserving reused live tokens. No immediate deletion by guessed ownership.
+  Endpoint tested only in isolated image `ai-fire2-vault-v2-acceptance:cleanup`;
+  **not deployed to working Vault and not automatically scheduled**.
+- Isolated cleanup test: **PASS** live orphan/reuse retained, concurrent cleanup,
+  expired deletion, replacement and reveal-role denial. Expiry in this test is
+  forced; it does not replace earlier real-wait TTL evidence. Partial commit is
+  simulated by withholding message attachment, not an injected WebUI SQL failure.
+- Nonbrowser regression: **101 passed**, 12.21 s, one dependency warning.
+
+Overall remains **NOT ACCEPTED**: historical 503 root cause, real WebUI commit
+fault, comprehensive PostgreSQL/log scans and explicit output-DLP outage rerun
+are still outstanding. Three skipped browser fault tests are not acceptance.
+
 ## Restore diagnosis and new execution (supersedes restore FAIL below)
 
 Original cause: copied OpenBao storage had ownership incompatible with runtime
