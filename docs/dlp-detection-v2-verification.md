@@ -1,5 +1,22 @@
 # DLP Detection Engine v2 verification
 
+## Latest integration attempt
+
+Nonbrowser regression rerun: **103 passed**, 10.39 seconds, one dependency
+warning (`artifacts/v2-current-regression.log`). The previous failed assertion
+compared a global Mock last-request capture, not Vault same-scope token reuse.
+Targeted rerun passed unchanged. Root cause of historical capture mismatch is
+not proven; no token logic or assertion was disabled.
+
+Multi-category browser test split into eight independent parametrized cases,
+with action/category, reveal, reload and masked-history assertions. Initial run:
+**1 passed, 1 failed**, continuation returned 503. Follow-up run stalled after
+first passed case and was stopped. These are not accepted E2E results.
+Do not claim integration complete. Policy Manager remains unimplemented.
+
+User requested arbitrary real-data input; current deployment still enforces
+generated-fixture membership. No unrestricted real-PII enablement was deployed.
+
 Status: **PARTIAL, backend deployed; not final acceptance**. Vault debt is
 nonblocking. No production-readiness claim.
 
