@@ -1,5 +1,49 @@
 # Vault v2 verification — November 12, 2026
 
+## Security acceptance checkpoint — latest, supersedes historical completion claims
+
+Overall: **NOT ACCEPTED**. Synthetic fixtures only. No new user features.
+
+Verified fork UI checkpoint: `e3180eb1c` (reveal and chat management).
+Pagination fix remains uncommitted/unbuilt: memory watchdog refused the last
+build (6738 MiB available, 525 MiB swap used). Do not claim it is deployed.
+Working deployment uses `compose.native.yaml`, `compose.native-core.yaml`,
+`compose.pii-test.yaml`, `compose.native-vault-v2.yaml`, plus `compose.vault-v2.yaml`.
+Actual container image IDs and mount destinations (no environment secrets) were
+recorded in ignored `artifacts/security-acceptance-runtime.json`.
+
+New command: `python3 scripts/accept-vault-v2-isolated.py`.
+Isolated project `ai-fire2-v2-acceptance` uses its own `pg` and `bao` volumes,
+an internal network and separate credentials. No working volumes were mounted.
+**FAIL**: initial provisioning did not complete; isolated OpenBao is initialized
+and sealed. No TTL/restart result from this runner is accepted. Lab retained for
+diagnosis; rerun is intentionally refused once init material exists. Never remove
+its Bao volume without preserving its recovery material. Recovery requires the
+matching lab unseal share; do not use working-system recovery credentials.
+Evidence: `artifacts/v2-isolated-acceptance.log`. The script is draft, not a
+validated recovery procedure. Subprocess stderr/exception arguments are suppressed.
+
+| Acceptance requirement | Current status |
+|---|---|
+| Existing Native basic reveal/chat management | PASS (previous Chromium run) |
+| Real-wait short TTL | NOT TESTED (new runner blocked before test) |
+| Full dependency restart, seal/unseal recovery | NOT TESTED |
+| Isolated PostgreSQL/OpenBao backup and restore | NOT TESTED |
+| Transit key rotation with old mapping readability | NOT TESTED |
+| Service credential rotation/revocation | NOT TESTED (earlier containment is not full lifecycle) |
+| Native two-verified-user isolation | NOT TESTED |
+| STORE/REVEAL/DELETE race semantics | NOT TESTED |
+| Nine requested fault-injection scenarios | NOT TESTED |
+| Bounded orphan cleanup/compensation | NOT IMPLEMENTED |
+| Comprehensive persistent browser/DB/WAL/log sweep | NOT TESTED |
+| Full regression and native security rerun this increment | NOT TESTED |
+
+Resource observation before isolated lab: 4899 MiB available, 524 MiB swap used.
+Known risks remain: periodic credentials without automatic renewal, bootstrap DB
+owner, test-only internal HTTP and one-share unseal, missing orphan cleanup.
+No production-readiness claim. Working dependencies were not restarted or sealed
+by this increment; only isolated lab dependencies were started.
+
 Status: **partial implementation, not migration/security acceptance**. Native
 runtime remains unchanged on its synthetic-only Vault; no real PII enabled.
 
