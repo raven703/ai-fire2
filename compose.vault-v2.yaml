@@ -1,0 +1,64 @@
+name: ai-fire2-vault-v2
+services:
+  gateway-v2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vault-v2
+    command: [uvicorn, ai_firewall.vault_v2_gateway:app, --host, 0.0.0.0, --port, '8000', --no-access-log, --log-level, critical]
+    environment:
+      VAULT_WRITE_KEY_FILE: /run/secrets/write-key
+    volumes:
+      - ./artifacts/vault-v2-secrets/write-key:/run/secrets/write-key:ro
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 128m
+    networks: [client]
+  postgres:
+    image: postgres:17.7-bookworm
+    environment:
+      POSTGRES_DB: vault
+      POSTGRES_USER: vault
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg-password
+    volumes:
+      - vault-v2-pg:/var/lib/postgresql/data
+      - ./artifacts/vault-v2-secrets/pg-password:/run/secrets/pg-password:ro
+      - ./config/vault-v2-schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    networks: [database]
+    mem_limit: 256m
+  openbao:
+    image: openbao/openbao:2.5.0
+    command: [server, -config=/bao/config/test.hcl]
+    cap_add: [IPC_LOCK]
+    volumes:
+      - vault-v2-bao:/bao/data
+      - ./config/vault-v2-bao.hcl:/bao/config/test.hcl:ro
+    networks: [keys]
+    mem_limit: 256m
+  vault-v2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vault-v2
+    environment:
+      PG_PASSWORD_FILE: /run/secrets/pg-password
+      BAO_TOKEN_FILE: /run/secrets/bao-encrypt
+      BAO_DECRYPT_TOKEN_FILE: /run/secrets/bao-decrypt
+      VAULT_WRITE_KEY_FILE: /run/secrets/write-key
+      VAULT_REVEAL_KEY_FILE: /run/secrets/reveal-key
+      BAO_URL: http://openbao:8200
+    volumes:
+      - ./artifacts/vault-v2-secrets/pg-password:/run/secrets/pg-password:ro
+      - ./artifacts/vault-v2-secrets/vault-encrypt:/run/secrets/bao-encrypt:ro
+      - ./artifacts/vault-v2-secrets/vault-decrypt:/run/secrets/bao-decrypt:ro
+      - ./artifacts/vault-v2-secrets/write-key:/run/secrets/write-key:ro
+      - ./artifacts/vault-v2-secrets/reveal-key:/run/secrets/reveal-key:ro
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 128m
+    networks: [database, keys, client]
+networks:
+  database: {internal: true}
+  keys: {internal: true}
+  client: {internal: true}
+volumes:
+  vault-v2-pg:
+  vault-v2-bao:

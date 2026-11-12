@@ -1,0 +1,41 @@
+From 6bee48116dd80b8518bac86ea021edf33f93b24f Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Thu, 12 Nov 2026 12:40:14 +0300
+Subject: [PATCH] Handle protected HTTP-only native UI without socket reconnect
+ warnings
+
+---
+ src/routes/+layout.svelte    | 3 +++
+ src/routes/auth/+page.svelte | 2 +-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/routes/+layout.svelte b/src/routes/+layout.svelte
+index 2806712e5..7585075ec 100644
+--- a/src/routes/+layout.svelte
++++ b/src/routes/+layout.svelte
+@@ -184,6 +184,9 @@
+ 	};
+ 
+ 	const setupSocket = async (enableWebsocket) => {
++		// Protected native text mode deliberately has no socket content channel.
++		// HTTP chat remains available; do not report a fictitious outage.
++		if ($config?.features?.native_text_only) return;
+ 		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
+ 			reconnection: true,
+ 			reconnectionDelay: 1000,
+diff --git a/src/routes/auth/+page.svelte b/src/routes/auth/+page.svelte
+index 944da5374..0c06ef4bd 100644
+--- a/src/routes/auth/+page.svelte
++++ b/src/routes/auth/+page.svelte
+@@ -76,7 +76,7 @@
+ 			if (sessionUser.token) {
+ 				localStorage.token = sessionUser.token;
+ 			}
+-			$socket.emit('user-join', { auth: { token: sessionUser.token } });
++			$socket?.emit('user-join', { auth: { token: sessionUser.token } });
+ 			await user.set(sessionUser);
+ 			await config.set(await getBackendConfig());
+ 
+-- 
+2.34.1
+

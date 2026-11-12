@@ -15,8 +15,39 @@ from open_webui.utils.firewall import inspector, valid_id
 
 from ai_firewall.native_client import revision
 from ai_firewall.native_lifecycle import append_message, complete_chat
+from ai_firewall.native_writer import inspected_flush
 
 router = APIRouter()
+
+
+@router.get('/api/v1/chats/{chat_id}')
+async def preview_chat(chat_id: str, user=Depends(get_verified_user)):
+    valid_id(chat_id)
+    state = await Chats.get_chat_by_id(chat_id)
+    if state is None or state.user_id != user.id:
+        raise HTTPException(404, 'native_chat_not_found')
+    return state.model_dump()
+
+
+@router.delete('/api/v1/chats/{chat_id}')
+async def delete_chat(chat_id: str, user=Depends(get_verified_user)):
+    from sqlalchemy import select, text
+    from open_webui.models.chats import Chat
+    from open_webui.models.chat_messages import ChatMessage
+    valid_id(chat_id)
+    async with AsyncSessionLocal() as session:
+        await session.execute(text('BEGIN IMMEDIATE'))
+        row = await session.get(Chat, chat_id)
+        if row is None or row.user_id != user.id:
+            raise HTTPException(404, 'native_chat_not_found')
+        current = revision(row.chat)
+        messages = (await session.execute(select(ChatMessage).where(ChatMessage.chat_id == chat_id))).scalars().all()
+        for message in messages:
+            await session.delete(message)
+        await session.delete(row)
+        await inspected_flush(session, inspector(), user.id, chat_id, current)
+        await session.commit()
+    return True
 
 
 @router.get('/api/models/native')

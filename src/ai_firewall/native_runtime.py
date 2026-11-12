@@ -55,6 +55,16 @@ class StagedNative:
                               '/api/v1/auths/', '/api/v1/users/user/settings', '/api/v1/users/user/permissions'}
         static_get = not path.startswith(('/api', '/ws', '/openai', '/ollama', '/oauth'))
         native_enabled = os.environ.get('FIREWALL_NATIVE_HTTP') == 'true'
+        if native_enabled and method == 'GET' and path == '/api/config':
+            captured = []
+            async def capture(event):
+                captured.append(event)
+            config_scope = {**scope, 'headers': [(k, v) for k, v in scope.get('headers', []) if k.lower() != b'accept-encoding']}
+            await upstream(config_scope, receive, capture)
+            body = b''.join(e.get('body', b'') for e in captured if e['type'] == 'http.response.body')
+            config = json.loads(body)
+            config.setdefault('features', {})['native_text_only'] = True
+            return await JSONResponse(config, headers={'Cache-Control': 'no-store'})(scope, receive, send)
         if native_enabled and method == 'GET' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/view', path):
             # No saved auxiliary view state is enabled in protected text mode.
             return await JSONResponse({'state': None}, headers={'Cache-Control': 'no-store'})(scope, receive, send)
@@ -67,10 +77,11 @@ class StagedNative:
         if native_enabled and method == 'GET' and path in empty_discovery:
             return await JSONResponse([], headers={'Cache-Control': 'no-store'})(scope, receive, send)
         native_get = (path in {'/api/models/native', '/api/v1/chats/native/list'}
-                      or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/native', path))
+                      or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}(?:/native)?', path))
+        native_delete = method == 'DELETE' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}', path)
         native_post = path == '/api/chat/completions/native'
         if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)
-                or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post)))):
+                or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post) or native_delete))):
             return await JSONResponse({'detail': 'native_content_not_accepted'}, status_code=503,
                                       headers={'Cache-Control': 'no-store'})(scope, receive, send)
         if method == 'POST':
