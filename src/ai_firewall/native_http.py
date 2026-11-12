@@ -146,10 +146,16 @@ async def turn(body: Turn, user=Depends(get_verified_user)):
         if body.parent_id is not None:
             raise HTTPException(400, 'native_new_chat_scope_invalid')
         cid = new_chat_id
+        # Derive titles only from canonical DLP output, never raw input or reveal.
+        clean = await check.inspect({'content': body.content}, user.id, cid,
+                                    'input', revision({}))
+        body.content = clean['content']
+        title = re.sub(r'\[V2_[^\]]+\]', '[ПДн]', body.content)
+        title = ' '.join(title.split())[:72] or 'Защищённый чат'
         message = {'id': body.message_id, 'parentId': None, 'childrenIds': [],
                    'role': 'user', 'content': body.content, 'models': ['mock']}
         state = await Chats.insert_new_chat(cid, user.id, ChatForm(chat={
-            'title': 'New Chat', 'models': ['mock'],
+            'title': title, 'models': ['mock'],
             'history': {'messages': {body.message_id: message}, 'currentId': body.message_id},
         }))
     try:

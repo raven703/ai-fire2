@@ -23,6 +23,10 @@ def test_native_preview_delete_and_no_socket_warning():
         assert turn.value.status==200
         result=turn.value.json(); assert result['error'] is None
         cid=result['chat']['id']
+        assert result['chat']['title']=='[ПДн]'
+        item=page.locator(f'[data-sidebar-chat-id="{cid}"]').first
+        expect(item).to_be_visible(timeout=15000)
+        expect(item.locator('[role="checkbox"]')).to_be_visible()
         token=page.evaluate('localStorage.token')
         headers={'Authorization':'Bearer '+token}
         preview=page.request.get('http://webui:8080/api/v1/chats/'+cid,headers=headers)
@@ -34,4 +38,32 @@ def test_native_preview_delete_and_no_socket_warning():
         deleted=page.request.delete('http://webui:8080/api/v1/chats/'+cid,headers=headers)
         assert deleted.status==200,deleted.text()
         assert page.request.get('http://webui:8080/api/v1/chats/'+cid,headers=headers).status==404
+        # New Chat must clear both visible history AND the previous native scope.
+        page.locator('#sidebar-new-chat-button').filter(visible=True).first.dispatch_event('click')
+        expect(page.locator('#chat-input')).to_be_visible()
+        page.locator('#chat-input').fill('тестовое сообщение')
+        with page.expect_response(lambda r:'/api/chat/completions/native' in r.url,timeout=90000) as next_turn:
+            page.locator('#chat-input').press('Enter')
+        assert next_turn.value.status==200
+        assert next_turn.value.json()['error'] is None
+        assert next_turn.value.json()['chat']['id']!=cid
+        next_chat=next_turn.value.json()['chat']
+        assert next_chat['title']=='тестовое сообщение'
+        expect(page.locator(f'[data-sidebar-chat-id="{next_chat["id"]}"]').first).to_be_visible(timeout=15000)
+        expect(composer).to_have_text('',timeout=15000)
+        page.locator('#sidebar-new-chat-button').filter(visible=True).first.dispatch_event('click')
+        page.wait_for_url('http://webui:8080/')
+        expect(composer).to_have_text('',timeout=15000)
+        composer.fill('групповое удаление')
+        with page.expect_response(lambda r:'/api/chat/completions/native' in r.url,timeout=90000) as third_turn:
+            composer.press('Enter')
+        third_id=third_turn.value.json()['chat']['id']
+        page.get_by_role('button',name='Open Sidebar',exact=True).filter(visible=True).first.click()
+        for selected_id in (next_chat['id'],third_id):
+            page.locator(f'[data-sidebar-chat-id="{selected_id}"] [role="checkbox"]').first.click()
+        page.get_by_role('button',name='Delete selected chats',exact=True).click()
+        page.get_by_role('dialog').get_by_role('button',name='Delete',exact=True).click()
+        for selected_id in (next_chat['id'],third_id):
+            expect(page.locator(f'[data-sidebar-chat-id="{selected_id}"]')).to_have_count(0,timeout=15000)
+            assert page.request.get('http://webui:8080/api/v1/chats/'+selected_id,headers=headers).status==404
         browser.close()

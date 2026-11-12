@@ -8,6 +8,7 @@ Only SQLite is supported at this synthetic stage; other dialects deny writes.
 from contextlib import contextmanager
 from contextvars import ContextVar
 import json
+import hashlib
 import sqlite3
 
 from fastapi import HTTPException
@@ -44,7 +45,7 @@ async def inspected_flush(session, inspector, user, chat, current_revision):
                     raise HTTPException(503, 'native_callable_default_unreviewed')
                 setattr(row, column.key, column.default.arg)
     actual = sorted(({'table': row.__table__.name, 'delete': row in sync.deleted,
-                      'columns': snapshot(row)} for row in rows),
+                      'columns': permit_snapshot(row, row in sync.deleted)} for row in rows),
                     key=lambda row: (row['table'], str(row['columns'].get('id'))))
     if not actual:
         return
@@ -58,6 +59,15 @@ async def inspected_flush(session, inspector, user, chat, current_revision):
 
 def snapshot(row):
     return {column.key: getattr(row, column.key) for column in row.__table__.columns}
+
+
+def permit_snapshot(row, deleting=False):
+    if not deleting:
+        return snapshot(row)
+    # Exact deletion authorization binds the old row without re-submitting its
+    # content to NLP/Vault. Deleting cannot publish or introduce plaintext.
+    from ai_firewall.protocol import canonical
+    return {'id': row.id, 'row_sha256': hashlib.sha256(canonical(snapshot(row))).hexdigest()}
 
 
 @contextmanager
@@ -82,7 +92,7 @@ def guard_flush(session, flush_context, instances):
         raise HTTPException(403, 'native_writer_permit_required')
     payload = permit['payload']
     actual = sorted(({'table': row.__table__.name,
-                      'delete': row in session.deleted, 'columns': snapshot(row)} for row in rows),
+                      'delete': row in session.deleted, 'columns': permit_snapshot(row, row in session.deleted)} for row in rows),
                     key=lambda row: (row['table'], str(row['columns'].get('id'))))
     # Every free-text column, nested JSON value, title and metadata is covered.
     if payload.get('fields') != {'rows': json.dumps(actual, sort_keys=True, separators=(',', ':'))}:
