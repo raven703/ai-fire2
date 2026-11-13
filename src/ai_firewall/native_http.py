@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.internal.db import AsyncSessionLocal
@@ -129,23 +129,95 @@ async def read_chat(chat_id: str, user=Depends(get_verified_user)):
     return {'chat': state.model_dump(), 'revision': revision(state.chat)}
 
 
+@router.post('/api/v1/files/native')
+async def file_upload(request:Request,user=Depends(get_verified_user)):
+    await Chats.require_chat_creation_permission(user.id)
+    if user.role!='admin' and not (getattr(user,'permissions',None) or {}).get('chat',{}).get('file_upload',True):
+        raise HTTPException(403,'file_upload_denied')
+    chat_id=request.headers.get('X-Chat-ID','');valid_id(chat_id)
+    existing=await Chats.get_chat_by_id(chat_id)
+    if existing is not None and existing.user_id!=user.id:raise HTTPException(404,'native_chat_not_found')
+    extension=request.headers.get('X-File-Extension','')
+    # Query policy before extraction so the complete lifecycle pins one revision.
+    async with httpx.AsyncClient(timeout=115,trust_env=False) as client:
+        policy=await client.post(os.environ['DLP_POLICY_URL']+'/policy-manager',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY']},json={'action':'view','actor':user.id})
+        if policy.status_code!=200:raise HTTPException(503,'policy_service_unavailable')
+        pinned=policy.json()['active']
+        result=await client.post(os.environ['NATIVE_FILE_OCR_URL']+'/extract',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY'],'X-File-Extension':extension},content=await request.body())
+    if result.status_code!=200:return {'action':'REVIEW','categories':[],'reasons':['extraction_unavailable'],'status':'incomplete'}
+    extracted=result.json()
+    if extracted['status']!='COMPLETE':return {'action':'REVIEW','categories':[],'reasons':extracted['reasons'],'status':'incomplete'}
+    blocks=extracted['blocks']
+    fields={f'block_{i}':block['text'] for i,block in enumerate(blocks)}
+    check=inspector();check.policy_revision=pinned
+    try:
+        verdict=await check.inspect(fields,user.id,chat_id,'input',revision({}),receipt=True)
+    except HTTPException as exc:
+        if exc.status_code==403:return {'action':exc.detail if exc.detail in {'BLOCK','REVIEW'} else 'REVIEW','categories':[],'reasons':['policy_denied'],'status':'denied'}
+        raise
+    from ai_firewall.file_admission import save
+    # Never return raw OCR text/word strings or user-controlled filenames.
+    metadata=[]
+    for i,block in enumerate(blocks):
+        source=block['source']
+        page_match=re.search(r'(?:page|frame)/(\d+)',source)
+        metadata.append({'block':f'block_{i}','page':int(page_match[1]) if page_match else None,
+            'part':i+1,'source_type':'sheet' if source.startswith('sheet/') else 'document',
+            'method':block.get('method'),'confidence':block.get('confidence'),'variant':block.get('variant'),
+            'status':block.get('status'),'boxes':[w['bbox'] for w in block.get('words',[])],
+            'word_confidence':[w['confidence'] for w in block.get('words',[])]})
+    identifier=save(user.id,chat_id,pinned,verdict['payload']['fields'],metadata)
+    return {'id':identifier,'chat_id':chat_id,'action':verdict['action'],'categories':verdict.get('categories',[]),'policy_revision':pinned,'status':'ready','blocks':metadata}
+
+
 class Turn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     chat_id: str | None = None
     revision: str | None = None
     parent_id: str | None = None
     message_id: str
+    file_ids: list[str] = Field(default_factory=list,max_length=4)
+    new_chat_id: str | None = None
     content: str = Field(min_length=1, max_length=16000)
 
 
 @router.post('/api/chat/completions/native')
 async def turn(body: Turn, user=Depends(get_verified_user)):
+    from ai_firewall.native_client import pinned_file_policy
+    handle=pinned_file_policy.set(None)
+    try:return await file_turn(body,user)
+    finally:pinned_file_policy.reset(handle)
+
+
+async def file_turn(body: Turn,user):
     valid_id(body.message_id)
     if os.environ.get('FIREWALL_NATIVE_WRITERS') != 'true':
         raise HTTPException(503, 'native_writer_disabled')
     check = inspector()
     debug = None
-    new_chat_id = str(uuid4())
+    new_chat_id = body.new_chat_id or str(uuid4())
+    valid_id(new_chat_id)
+    if body.new_chat_id and await Chats.get_chat_by_id(new_chat_id) is not None:
+        raise HTTPException(409,'native_new_chat_scope_conflict')
+    if body.chat_id:
+        valid_id(body.chat_id)
+        owned=await Chats.get_chat_by_id(body.chat_id)
+        if owned is None or owned.user_id!=user.id:raise HTTPException(404,'native_chat_not_found')
+    if body.file_ids:
+        from ai_firewall.file_admission import load
+        async with httpx.AsyncClient(timeout=10,trust_env=False) as client:
+            response=await client.post(os.environ['DLP_POLICY_URL']+'/policy-manager',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY']},json={'action':'view','actor':user.id})
+        if response.status_code!=200:raise HTTPException(503,'policy_service_unavailable')
+        check.policy_revision=response.json()['active']
+        from ai_firewall.native_client import pinned_file_policy
+        pinned_file_policy.set(check.policy_revision)
+        contexts=[]
+        for identifier in body.file_ids:
+            valid_id(identifier)
+            fields=load(identifier,user.id,body.chat_id or new_chat_id,check.policy_revision)
+            contexts.extend(fields.values())
+        body.content+='\n\n[Проверенное вложение]\n'+'\n'.join(contexts)
+        if len(body.content)>7000:raise HTTPException(413,'file_context_too_large')
     if os.getenv('DLP_DEBUG_TEST_ONLY') == 'true':
         await Chats.require_chat_creation_permission(user.id)
         # Inspect raw turn before canonical storage discards its detection evidence.

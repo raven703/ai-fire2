@@ -83,7 +83,7 @@ class StagedNative:
         native_get = (path in {'/api/models/native', '/api/v1/chats/native/list', '/api/v1/users/', '/api/v1/groups/'}
                       or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}(?:/native)?', path))
         native_delete = method == 'DELETE' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}', path)
-        native_post = (path in {'/api/chat/completions/native','/api/v1/dlp/policies'} or
+        native_post = (path in {'/api/chat/completions/native','/api/v1/dlp/policies','/api/v1/files/native'} or
                        re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/native/reveal', path))
         if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)
                 or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post) or native_delete))):
@@ -96,7 +96,7 @@ class StagedNative:
                 if event['type'] == 'http.disconnect':
                     return
                 body.extend(event.get('body', b''))
-                if len(body) > 8192:
+                if len(body) > (10*1024*1024 if path=='/api/v1/files/native' else 8192):
                     return await JSONResponse({'detail': 'body_too_large'}, status_code=413)(scope, receive, send)
                 if not event.get('more_body'):
                     break

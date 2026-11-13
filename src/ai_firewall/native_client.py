@@ -1,4 +1,8 @@
 """Backend-only native admission client. Never accepts a browser-issued permit."""
+from contextvars import ContextVar
+
+pinned_file_policy = ContextVar("pinned_file_policy", default=None)
+
 import hashlib
 import logging
 import time
@@ -17,7 +21,7 @@ class NativeInspector:
         self.service_key = service_key
         self.receipts = Admission(admission_key.encode(), 'synthetic-v2')
         self.transport = transport
-        self.policy_revision = None
+        self.policy_revision = pinned_file_policy.get()
 
     async def inspect(self, fields, user, chat, operation, revision, *, receipt=False):
         correlation=uuid4().hex

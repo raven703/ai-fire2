@@ -1,0 +1,100 @@
+From 73908070734038b08e986476186186ddb4d0432b Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 11:26:39 +0300
+Subject: [PATCH] Enable protected document and OCR attachments in original
+ composer
+
+---
+ src/lib/components/chat/Chat.svelte         |  8 +++---
+ src/lib/components/chat/MessageInput.svelte | 27 ++++++++++++++++++++-
+ 2 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/src/lib/components/chat/Chat.svelte b/src/lib/components/chat/Chat.svelte
+index 1ff4d042c..9c181f845 100644
+--- a/src/lib/components/chat/Chat.svelte
++++ b/src/lib/components/chat/Chat.svelte
+@@ -437,7 +437,7 @@
+ 	let chat: any = null;
+ 	let nativeRevision: string | null = null;
+ 	const submitNativeTurn = async (content: string, attachments: any[]) => {
+-		if (attachments.length) throw new Error('Protected chat supports text only');
++		if (attachments.some(f=>!f.native||f.status!=='ready')){toast.error('Вложение заблокировано, требует проверки или ещё обрабатывается');return;}
+ 		generating = true;
+ 		try {
+ 			const response = await fetch('/api/chat/completions/native', {
+@@ -448,7 +448,9 @@
+ 					revision: nativeRevision,
+ 					parent_id: history.currentId ?? null,
+ 					message_id: uuidv4(),
+-					content
++					content: content || 'Проанализируй проверенное вложение',
++					file_ids: attachments.map(f=>f.id),
++					new_chat_id: chat?.id ? null : attachments[0]?.scope
+ 				})
+ 			});
+ 			if (!response.ok) throw new Error('Protected message rejected');
+@@ -459,7 +461,7 @@
+ 			chatId.set(chat.id);
+ 			chatTitle.set(chat.title);
+ 			await refreshChatList(localStorage.token);
+-			prompt = '';
++			prompt = '';files=[];
+ 			if (!embedded) window.history.replaceState(window.history.state, '', `/c/${chat.id}`);
+ 			if (canonical.error) toast.error('Response unavailable; checked input retained');
+ 			await tick();
+diff --git a/src/lib/components/chat/MessageInput.svelte b/src/lib/components/chat/MessageInput.svelte
+index 8232f7766..b952e0566 100644
+--- a/src/lib/components/chat/MessageInput.svelte
++++ b/src/lib/components/chat/MessageInput.svelte
+@@ -899,7 +899,7 @@
+ 	);
+ 
+ 	let fileUploadEnabled: boolean = true;
+-	$: fileUploadEnabled =
++	$: fileUploadEnabled = $config?.features?.native_text_only ||
+ 		(getFilesystemUploadTerminal($selectedTerminalId, $terminalServers, $settings) ||
+ 			fileUploadCapableModels.length === selectedModelIds.length) &&
+ 		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
+@@ -1269,7 +1269,25 @@
+ 		}
+ 	};
+ 
++ let nativeScope='';
++ const nativeUpload=async (inputFiles:File[])=>{
++  if(files.length+inputFiles.length>4){toast.error('Не более 4 вложений');return;}
++  if(!nativeScope)nativeScope=chatId||uuidv4();
++  for(const file of inputFiles){
++   const item:any={id:uuidv4(),type:'native-file',name:'Защищённое вложение',status:'processing',native:true,scope:nativeScope,action:'OCR',categories:[]};
++   files=[...files,item];
++   try{
++    if(file.size>10*1024*1024)throw new Error('Файл больше 10 МБ');
++    const response=await fetch('/api/v1/files/native',{method:'POST',headers:{Authorization:`Bearer ${localStorage.token}`,'X-Chat-ID':nativeScope,'X-File-Extension':file.name.split('.').pop()?.toLowerCase()??''},body:file});
++    if(!response.ok)throw new Error(`Безопасная обработка недоступна (${response.status})`);
++    const result=await response.json();
++    item.id=result.id??item.id;item.action=result.action;item.categories=result.categories??[];item.status=result.status==='ready'?'ready':'denied';item.blocks=result.blocks??[];item.reason=result.reasons?.join(', ');
++   }catch(e){item.status='denied';item.action='REVIEW';item.reason='Ошибка или лимит обработки';}
++   files=[...files];
++  }
++ };
+ 	const inputFilesHandler = async (inputFiles) => {
++  if($config?.features?.native_text_only)return await nativeUpload(Array.from(inputFiles));
+ 		console.log('Input files handler called with:', inputFiles);
+ 
+ 		if (
+@@ -2040,6 +2058,13 @@
+ 					: 'max-w-[58rem]'} px-2 mx-auto inset-x-0"
+ 			>
+ 				<div class="">
++     {#if $config?.features?.native_text_only}
++      <div class="px-3 py-2 space-y-2" aria-label="Защищённые вложения">
++       <button type="button" class="text-sm rounded-lg border px-3 py-2" on:click={()=>filesInputElement.click()}>Прикрепить файл · DLP + OCR</button>
++       <p class="text-xs text-gray-500">PDF, DOCX, XLSX, TXT, PNG, JPG, TIFF, WebP · до 10 МБ. Только проверенный текст, не визуальное понимание.</p>
++       {#each files.filter(f=>f.native) as file}<div class="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-sm" data-testid="native-file-status"><strong>{file.status==='processing'?'OCR и DLP: обработка…':file.action}</strong><span>{file.categories.join(', ')}</span>{#if file.reason}<span>{file.reason}</span>{/if}<button type="button" aria-label="Убрать вложение" on:click={()=>files=files.filter(f=>f!==file)}>×</button></div>{/each}
++      </div>
++     {/if}
+ 					<input
+ 						bind:this={filesInputElement}
+ 						bind:files={inputFiles}
+-- 
+2.34.1
+

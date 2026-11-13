@@ -1,0 +1,23 @@
+services:
+  file-ocr:
+    image: ai-fire2-file-ocr:v1
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.file-ocr
+    environment:
+      NATIVE_GATEWAY_KEY: ${STORE_KEY:?required}
+    read_only: true
+    tmpfs: ['/tmp:size=192m,mode=1777']
+    mem_limit: 640m
+    cpus: 1.0
+    pids_limit: 48
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [file-inspection]
+  webui:
+    environment:
+      NATIVE_FILE_OCR_URL: http://file-ocr:8000
+    networks: [edge, inspection, model, vault-client, file-inspection]
+networks:
+  file-inspection:
+    internal: true

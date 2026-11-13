@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng libseccomp2 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml ./
+COPY src ./src
+RUN pip install --no-cache-dir . uvicorn==0.38.0 pillow==13.0.0 PyMuPDF==1.27.2 openpyxl==3.1.5 defusedxml==0.7.1
+ENV PYTHONPATH=/app/src OMP_THREAD_LIMIT=1 OPENBLAS_NUM_THREADS=1
+USER 65534:65534
+CMD ["uvicorn","ai_firewall.file_worker:app","--host","0.0.0.0","--port","8000","--no-access-log","--log-level","critical","--limit-concurrency","4"]
