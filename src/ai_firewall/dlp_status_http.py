@@ -44,7 +44,8 @@ async def status(request:Request,user=Depends(get_verified_user)):
     authorize(user)
     try:result=events.query(dict(request.query_params))
     except (ValueError,TypeError):raise HTTPException(400,'invalid_filters') from None
-    return {**result,'settings':events.settings(),'can_edit':user.role=='admin',
+    from ai_firewall import review_store
+    return {**result,'can_decide_review':review_store.permitted(user.id),'settings':events.settings(),'can_edit':user.role=='admin',
             'can_view_evidence':events.can_view(user.id)}
 
 @router.post('/api/v1/dlp/status/settings')
@@ -66,7 +67,9 @@ async def detail(identifier:str,user=Depends(get_verified_user)):
     with events.database() as db:
         rows=db.execute('SELECT timestamp,actor,operation,result FROM audit WHERE object=? ORDER BY timestamp DESC LIMIT 100',
             (event['evidence'].get('id',identifier),)).fetchall()
-    return {'event':event,'audit':[dict(zip(('timestamp','actor','operation','result'),r)) for r in rows],
+    from ai_firewall import review_store
+    review=review_store.get(identifier)
+    return {'review':review_store.public(review),'can_decide_review':review_store.permitted(user.id),'event':event,'audit':[dict(zip(('timestamp','actor','operation','result'),r)) for r in rows],
         'can_view_evidence':events.can_view(user.id)}
 
 @router.post('/api/v1/dlp/status/{identifier}/evidence')

@@ -2,6 +2,7 @@
 from contextvars import ContextVar
 
 pinned_file_policy = ContextVar("pinned_file_policy", default=None)
+review_execution = ContextVar('review_execution', default=None)
 
 import hashlib
 import logging
@@ -94,6 +95,33 @@ class NativeInspector:
                 raise ValueError()
             return result
         except Exception: raise HTTPException(503,'native_delete_permit_unavailable') from None
+
+    async def review_model(self, saved, user, chat):
+        from ai_firewall.review_contract import scope,issue
+        if saved['user']!=user or saved['chat']!=chat:raise HTTPException(403,'review_scope_invalid')
+        fields={'content':saved['turn']['content']}
+        claims=scope(saved['event'],fields,user,chat,saved['policy'])
+        import os
+        token=issue(os.environ['ADMISSION_KEY'],claims)
+        async with httpx.AsyncClient(timeout=15,trust_env=False,transport=self.transport) as client:
+            response=await client.post(self.url+'/native/review-model',headers={'Authorization':'Bearer '+self.service_key},
+                json={'event':saved['event'],'fields':fields,'user':user,'chat':chat,'policy':saved['policy'],'permit':token})
+        if response.status_code!=200:raise HTTPException(403,'review_model_denied')
+        result=response.json()
+        if result.get('fields')!=fields or result.get('policy_revision')!=saved['policy']:raise HTTPException(503,'review_receipt_invalid')
+        return result['fields']['content']
+
+    async def delta(self,fields,delta,before,user,chat,current_revision):
+        import json
+        payload=dict(fields=fields,before=before,delta=delta,user=user,chat=chat,operation='chat-delta',revision=current_revision)
+        async with httpx.AsyncClient(timeout=15,trust_env=False,transport=self.transport) as client:
+            response=await client.post(self.url+'/native/delta-permit',headers={'Authorization':'Bearer '+self.service_key},
+                json={'payload':payload,'delta':json.dumps(delta,sort_keys=True,separators=(',',':'))})
+        if response.status_code!=200:raise HTTPException(403,'native_delta_denied')
+        result=response.json()
+        if result.get('payload')!=payload or not self.receipts.verify(result['admission'],canonical(payload),user,'chat-delta'):
+            raise HTTPException(503,'native_delta_receipt_invalid')
+        return result
 
 
 def revision(value):

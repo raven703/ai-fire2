@@ -27,6 +27,9 @@ services:
   gateway:
     environment:
       PII_TEST_URL: http://pii:8000
+      REVIEW_NONCE_DB: /review/nonces.db
+    volumes:
+      - native-review-nonces:/review
     depends_on:
       pii:
         condition: service_healthy
@@ -42,4 +45,5 @@ services:
       DLP_AUDITOR_IDS: ${DLP_AUDITOR_IDS:-}
     networks: [edge, inspection, model]
 volumes:
+  native-review-nonces:
   native-policy-data:

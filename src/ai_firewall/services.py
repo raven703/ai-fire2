@@ -174,6 +174,56 @@ def gateway_app():
     detector = SyntheticDetector()
     admission = Admission(key('ADMISSION_KEY').encode(), 'synthetic-v2')
 
+    @app.post('/native/review-model')
+    async def review_model(request: Request):
+        auth(request,'NATIVE_GATEWAY_KEY')
+        from ai_firewall.review_contract import scope,verify
+        data=await request.json()
+        schema(data,{'event','fields','user','chat','policy','permit'})
+        native_context(data['user'],data['chat'])
+        if set(data['fields'])!={'content'}:raise HTTPException(400,'review_fields_invalid')
+        raw=validate_text(data['fields']['content'])
+        claims=scope(data['event'],data['fields'],data['user'],data['chat'],data['policy'])
+        nonce=verify(key('ADMISSION_KEY'),data['permit'],claims)
+        # Re-run mandatory detectors and active policy; only a current REVIEW qualifies.
+        detector.inspect(raw)
+        async with httpx.AsyncClient(timeout=10,trust_env=False) as client:
+            headers={'Authorization':'Bearer '+key('NATIVE_GATEWAY_KEY')}
+            active=await client.post(os.environ['PII_TEST_URL']+'/policy-manager',headers=headers,
+                json={'action':'view','actor':data['user']})
+            if active.status_code!=200 or active.json()['active']!=data['policy']:
+                raise HTTPException(409,'review_policy_changed')
+            response=await client.post(os.environ['PII_TEST_URL']+'/inspect',headers=headers,
+                json={'fields':data['fields'],'operation':'model-request','user':data['user'],'chat':data['chat'],'policy_revision':data['policy']})
+        detail=response.json().get('detail',{})
+        if response.status_code!=403 or not isinstance(detail,dict) or detail.get('action')!='REVIEW':
+            raise HTTPException(403,'review_no_longer_eligible')
+        # Shared persistent replay store. Claim before returning any model content.
+        db=sqlite3.connect(os.getenv('REVIEW_NONCE_DB','/tmp/review-nonces.db'),timeout=15)
+        try:
+            with db:
+                db.execute('CREATE TABLE IF NOT EXISTS used_review(nonce TEXT PRIMARY KEY)')
+                db.execute('INSERT INTO used_review VALUES(?)',(nonce,))
+        except sqlite3.IntegrityError:raise HTTPException(409,'review_permit_replayed') from None
+        finally:db.close()
+        return {'fields':data['fields'],'policy_revision':data['policy']}
+
+    @app.post('/native/delta-permit')
+    async def delta_permit(request:Request):
+        auth(request,'NATIVE_GATEWAY_KEY')
+        data=await request.json();schema(data,{'payload','delta'})
+        payload=data['payload']
+        schema(payload,{'fields','before','delta','user','chat','operation','revision'})
+        if payload['operation']!='chat-delta':raise HTTPException(400,'delta_operation_invalid')
+        if json.dumps(payload['delta'],sort_keys=True,separators=(',',':'))!=data['delta']:raise HTTPException(400,'delta_mismatch')
+        class Inspection:
+            headers=request.headers
+            async def json(self):return dict(fields={'delta':data['delta']},user=payload['user'],chat=payload['chat'],operation='chat-write',revision=payload['revision'])
+        checked=await native_inspect(Inspection())
+        if checked['action']!='ALLOW' or checked['payload']['fields']!={'delta':data['delta']}:
+            raise HTTPException(403,'delta_not_canonical')
+        return {'payload':payload,'action':'ALLOW','admission':admission.issue(canonical(payload),payload['user'],'chat-delta')}
+
     @app.post('/native/delete-permit')
     async def delete_permit(request: Request):
         auth(request,'NATIVE_GATEWAY_KEY')

@@ -1,0 +1,79 @@
+From ff107fc34fe5cf1808bee6d57538995ef92fe04f Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 15:24:07 +0300
+Subject: [PATCH] Add scoped REVIEW decisions and owner continuation UI
+
+---
+ src/lib/components/chat/Chat.svelte            | 10 ++++++++++
+ src/routes/(app)/admin/dlp-status/+page.svelte |  6 ++++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/components/chat/Chat.svelte b/src/lib/components/chat/Chat.svelte
+index 9c181f845..83a995756 100644
+--- a/src/lib/components/chat/Chat.svelte
++++ b/src/lib/components/chat/Chat.svelte
+@@ -436,6 +436,13 @@
+ 
+ 	let chat: any = null;
+ 	let nativeRevision: string | null = null;
++ let pendingReviews:any[]=[];
++ let reviewTimer:ReturnType<typeof setInterval>;
++ const reviewNames:Record<string,string>={PENDING:'Запрос ожидает согласования сотрудником ИБ',APPROVED:'Запрос разрешён, можно продолжить',REJECTED:'Запрос отклонён сотрудником ИБ',EXPIRED:'Срок согласования истёк. Отправьте запрос повторно',CONSUMED:'Согласование использовано',FAILED:'Продолжение не выполнено. Отправьте запрос повторно'};
++ async function refreshReviews(){try{const r=await fetch('/api/v1/dlp/reviews/mine',{headers:{Authorization:`Bearer ${localStorage.token}`}});if(r.ok)pendingReviews=(await r.json()).reviews;}catch{}}
++ onMount(()=>{if($config?.features?.native_text_only){refreshReviews();reviewTimer=setInterval(refreshReviews,4000);}return ()=>clearInterval(reviewTimer);});
++ async function resumeReview(id:string){generating=true;try{const r=await fetch('/api/v1/dlp/reviews/'+id+'/resume',{method:'POST',headers:{Authorization:`Bearer ${localStorage.token}`}});if(!r.ok)throw Error();const canonical=await r.json();chat=canonical.chat;nativeRevision=canonical.revision;history=structuredClone(chat.chat.history);chatId.set(chat.id);chatTitle.set(chat.title);await refreshChatList(localStorage.token);if(!embedded)window.history.replaceState(window.history.state,'',`/c/${chat.id}`);await refreshReviews();}catch{toast.error('Продолжение недоступно; непроверенный ответ не опубликован');await refreshReviews();}finally{generating=false;}}
++
+ 	const submitNativeTurn = async (content: string, attachments: any[]) => {
+ 		if (attachments.some(f=>!f.native||f.status!=='ready')){toast.error('Вложение заблокировано, требует проверки или ещё обрабатывается');return;}
+ 		generating = true;
+@@ -455,6 +462,7 @@
+ 			});
+ 			if (!response.ok) throw new Error('Protected message rejected');
+ 			const canonical = await response.json();
++            if(canonical.event_id){toast.info(canonical.review?canonical.message:'Исходное содержимое недоступно для согласования');prompt='';await refreshReviews();return;}
+ 			chat = canonical.chat;
+ 			nativeRevision = canonical.revision;
+ 			history = structuredClone(chat.chat.history);
+@@ -5286,6 +5294,8 @@
+ 		}
+ 	};
+ </script>
++{#if pendingReviews.length}<div class="px-4 py-2 text-sm" aria-label="Согласования запросов">{#each pendingReviews as item}<div class="flex items-center gap-3 py-1"><span>{reviewNames[item.state]??item.state}</span>{#if item.state==='APPROVED'}<button class="rounded-lg border px-3 py-1" disabled={generating} on:click={()=>resumeReview(item.id)}>Продолжить однократно</button>{/if}</div>{/each}</div>{/if}
++
+ 
+ <svelte:head>
+ 	<!-- LICENSE covers this Open WebUI browser-title identifier.
+diff --git a/src/routes/(app)/admin/dlp-status/+page.svelte b/src/routes/(app)/admin/dlp-status/+page.svelte
+index adb70cfc7..19fb72252 100644
+--- a/src/routes/(app)/admin/dlp-status/+page.svelte
++++ b/src/routes/(app)/admin/dlp-status/+page.svelte
+@@ -1,7 +1,8 @@
+ <script lang="ts">
+  import {onMount} from 'svelte';
+  import Modal from '$lib/components/common/Modal.svelte';
+- let showEvent=false;
++ let showEvent=false, review:any=null, reason='', deciding=false;
++ async function decide(action:string){if(!reason.trim()||deciding)return;if(!confirm(action==='APPROVED'?'Разрешить только этот запрос однократно?':'Отклонить этот запрос?'))return;deciding=true;try{await request('/api/v1/dlp/status/'+selected.event_id+'/decision',{method:'POST',body:JSON.stringify({action,reason})});await open(selected.event_id);await load();}catch(e){error=String(e);}finally{deciding=false;}}
+  const reasons:Record<string,string>={POLICY_REVIEW:'Требуется согласование сотрудником ИБ',POLICY_BLOCK:'Передача запрещена политикой безопасности',POLICY_MASK:'Данные скрыты согласно политике безопасности',POLICY_ALLOW:'Передача разрешена политикой безопасности',OCR_LOW_CONFIDENCE:'Недостаточная достоверность распознавания документа',EXTRACTION_INCOMPLETE:'Не удалось полностью проверить документ',DEPENDENCY_UNAVAILABLE:'Сервис обязательной проверки недоступен',PROCESSING_INTERRUPTED:'Безопасная обработка прервана',OCR_EMPTY:'Не удалось распознать текст документа'};
+  const explanation=(event:any)=>reasons[event.reason_code]??(event.action==='TECHNICAL_FAILURE'?'Техническая невозможность безопасной обработки':event.action==='REVIEW'?'Требуется согласование сотрудником ИБ':event.action==='BLOCK'?'Передача запрещена политикой безопасности':'Результат обязательной DLP-проверки');
+  let state:any=null, selected:any=null, audit:any[]=[], error='', page=0, busy=false;
+@@ -10,7 +11,7 @@
+  function headers(){return {Authorization:`Bearer ${localStorage.token}`,'Content-Type':'application/json'};}
+  async function request(url:string,options:any={}){const r=await fetch(url,{...options,headers:headers(),cache:'no-store'});if(!r.ok)throw Error(r.status===403?'Недостаточно прав.':`Операция недоступна (${r.status})`);return r.json();}
+  async function load(){busy=true;error='';try{const q=new URLSearchParams({page:String(page)});for(const [k,v] of Object.entries(filters)){if(v)q.set(k,['since','until'].includes(k)?String(new Date(String(v)).getTime()/1000):String(v));}state=await request('/api/v1/dlp/status?'+q);}catch(e){error=String(e);}finally{busy=false;}}
+- async function open(id:string){try{const r=await request('/api/v1/dlp/status/'+id);selected=r.event;audit=r.audit;showEvent=true;}catch(e){error=String(e);}}
++ async function open(id:string){try{const r=await request('/api/v1/dlp/status/'+id);selected=r.event;audit=r.audit;review=r.review;reason='';showEvent=true;}catch(e){error=String(e);}}
+  async function save(){try{await request('/api/v1/dlp/status/settings',{method:'POST',body:JSON.stringify(state.settings)});await load();}catch(e){error=String(e);}}
+  async function original(){if(!confirm('Оригинал может содержать конфиденциальные данные и опасное активное содержимое. Выдаётся только как скачивание. Не открывайте в неизолированном приложении. Авторизованный получатель может сохранить или скопировать файл. Продолжить?'))return;
+   try{const r=await fetch('/api/v1/dlp/status/'+selected.event_id+'/evidence',{method:'POST',headers:headers(),cache:'no-store'});if(!r.ok)throw Error('Просмотр недоступен ('+r.status+')');const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='protected-evidence.'+selected.extension;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);await open(selected.event_id);}catch(e){error=String(e);}}
+@@ -46,6 +47,7 @@
+     <details class="detail-section"><summary>Метаданные файла, OCR и блоки</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>
+     <div class="detail-section"><h3>Защищённый оригинал</h3><p class="muted small">{selected.evidence.status}</p>
+      {#if state.can_view_evidence && selected.evidence.status==='STORED'}<button class="secondary evidence-button" on:click={original}>Просмотреть оригинал</button><p class="muted small">Контролируемая выдача как скачивание; в браузере активное содержимое не открывается.</p>{/if}</div>
++    <div class="detail-section"><h3>Согласование</h3>{#if review}<p>{review.state}</p>{#each review.history as entry}<p class="finding">{new Date(entry.at*1000).toLocaleString()} · {entry.actor} · {entry.action} · {entry.reason}</p>{/each}{#if state.can_decide_review && review.state==='PENDING'}<label class="control"><span>Обоснование решения (обязательно)</span><input aria-label="Обоснование решения" bind:value={reason} maxlength="1000"/></label><div class="filter-actions">{#if state.can_view_evidence}<button class="primary" disabled={!reason.trim()||deciding} on:click={()=>decide('APPROVED')}>Разрешить однократно</button>{/if}<button class="secondary" disabled={!reason.trim()||deciding} on:click={()=>decide('REJECTED')}>Отклонить</button></div>{/if}{:else if selected.action==='REVIEW'}<p class="muted small">Исходное содержимое недоступно для согласования.</p>{/if}</div>
+     <div class="detail-section"><h3>Аудит доступа</h3>{#each audit as entry}<p class="finding">{new Date(entry.timestamp*1000).toLocaleString()} · {entry.actor} · {entry.operation} · {entry.result}</p>{:else}<p class="muted small">Записей доступа пока нет.</p>{/each}</div>
+    </section></Modal>{/if}
+    {#if state.can_edit}<details class="panel"><summary>Настройки Evidence Vault</summary><p class="hint">По умолчанию retention выключен. Включение — явное административное действие. Изменение TTL применяется к новым объектам.</p><div class="settings-grid">{#each Object.keys(labels) as key}{#if typeof state.settings[key]==='boolean'}<label class="setting-toggle"><span>{labels[key]}</span><input type="checkbox" bind:checked={state.settings[key]}/></label>{:else}<label class="control"><span>{labels[key]}</span><input type="number" bind:value={state.settings[key]}/></label>{/if}{/each}</div><button class="primary" on:click={save}>Сохранить настройки хранения</button></details>{/if}
+-- 
+2.34.1
+

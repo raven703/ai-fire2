@@ -117,6 +117,11 @@ async def complete_chat(sessions, inspector, user, chat_id, expected_revision,
     fields = {str(i): item['content'] for i, item in enumerate(chain)}
     clean = await inspector.inspect(fields, user, chat_id, 'model-request', expected_revision)
     chain = [{'role': item['role'], 'content': clean[str(i)]} for i, item in enumerate(chain)]
+    from ai_firewall.native_client import review_execution
+    approved=review_execution.get()
+    if approved is not None:
+        if approved['turn']['message_id']!=parent:raise HTTPException(409,'review_message_mismatch')
+        chain[-1]['content']=await inspector.review_model(approved,user,chat_id)
     try:
         async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
             response = await client.post(llm_url + '/v1/chat/completions',

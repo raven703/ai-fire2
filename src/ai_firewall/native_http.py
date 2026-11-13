@@ -267,8 +267,18 @@ async def file_turn(body: Turn,user):
             owned = await Chats.get_chat_by_id(body.chat_id)
             if owned is None or owned.user_id != user.id:
                 raise HTTPException(404, 'native_chat_not_found')
-        debug = await check.inspect({'content': body.content}, user.id, scope,
-            'input', revision({}), receipt=True)
+        try:
+            debug = await check.inspect({'content': body.content}, user.id, scope,
+                'input', revision({}), receipt=True)
+        except HTTPException as exc:
+            if exc.status_code!=403 or exc.detail!='REVIEW':raise
+            from ai_firewall import dlp_events as events
+            from ai_firewall.review_http import capture,policy
+            event=events.create(user_id=user.id,chat_id=scope,source='CHAT',action='REVIEW',reason_code='POLICY_REVIEW',
+                policy_revision=await policy(user.id),policy_version=check.diagnostics.get('policy_version'),
+                categories=check.diagnostics.get('categories') or [],findings=check.diagnostics.get('findings') or [])
+            if not body.chat_id:body.new_chat_id=scope
+            return await capture(body,user,event)
         body.content = debug['payload']['fields']['content']
     if body.chat_id:
         valid_id(body.chat_id)

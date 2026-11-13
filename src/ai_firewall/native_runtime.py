@@ -19,6 +19,8 @@ install()
 from ai_firewall.native_http import router as native_router
 from ai_firewall.dlp_status_http import router as status_router
 native_router.include_router(status_router)
+from ai_firewall.review_http import router as review_router
+native_router.include_router(review_router)
 upstream.include_router(native_router)
 # Upstream mounts its SPA at '/'; native routes must precede that catch-all.
 native_paths = {route.path for route in native_router.routes}
@@ -105,10 +107,10 @@ class StagedNative:
                            '/api/v1/skills/'}
         if native_enabled and method == 'GET' and path in empty_discovery:
             return await JSONResponse([], headers={'Cache-Control': 'no-store'})(scope, receive, send)
-        native_get = (re.fullmatch(r'/api/v1/dlp/status(?:/[a-f0-9-]{36})?',path) or path in {'/api/models/native', '/api/v1/chats/native/list', '/api/v1/users/', '/api/v1/groups/'}
+        native_get = (path=='/api/v1/dlp/reviews/mine' or re.fullmatch(r'/api/v1/dlp/status(?:/[a-f0-9-]{36})?',path) or path in {'/api/models/native', '/api/v1/chats/native/list', '/api/v1/users/', '/api/v1/groups/'}
                       or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}(?:/native)?', path))
         native_delete = method == 'DELETE' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}', path)
-        native_post = (path=='/api/v1/dlp/status/settings' or re.fullmatch(r'/api/v1/dlp/status/[a-f0-9-]{36}/evidence',path) or path in {'/api/chat/completions/native','/api/v1/dlp/policies','/api/v1/files/native'} or
+        native_post = (re.fullmatch(r'/api/v1/dlp/(?:status/[a-f0-9-]{36}/decision|reviews/[a-f0-9-]{36}/resume)',path) or path=='/api/v1/dlp/status/settings' or re.fullmatch(r'/api/v1/dlp/status/[a-f0-9-]{36}/evidence',path) or path in {'/api/chat/completions/native','/api/v1/dlp/policies','/api/v1/files/native'} or
                        re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/native/reveal', path))
         if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)
                 or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post) or native_delete))):

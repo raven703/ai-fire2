@@ -53,7 +53,22 @@ async def inspected_flush(session, inspector, user, chat, current_revision):
     if all(row['delete'] for row in actual):
         result = await inspector.deletion(fields,user,chat,current_revision)
     else:
-        result = await inspector.inspect(fields, user, chat, 'chat-write', current_revision, receipt=True)
+        from ai_firewall.history_delta import changed_fields,digest
+        from sqlalchemy import select
+        delta=[];before_hashes=[]
+        for row,item in zip(sorted(rows,key=lambda r:(r.__table__.name,str(r.id))),actual):
+            if row in sync.deleted:raise HTTPException(403,'native_mixed_delete_forbidden')
+            previous=None
+            if row not in sync.new:
+                with session.no_autoflush:
+                    old=(await session.execute(select(row.__table__).where(row.__table__.c.id==row.id))).mappings().one()
+                previous=dict(old)
+            before_hashes.append({'table':item['table'],'id':row.id,'digest':digest(previous)})
+            delta.append(changed_fields(previous or {},item['columns']))
+        if hasattr(inspector,'delta'):
+            result=await inspector.delta(fields,delta,before_hashes,user,chat,current_revision)
+        else:
+            result = await inspector.inspect(fields, user, chat, 'chat-write', current_revision, receipt=True)
         if result['payload']['fields'] != fields or result['action'] != 'ALLOW':
             raise HTTPException(403, 'native_writer_not_canonical')
     with authorized_write(inspector.receipts, result['admission'], result['payload'], current_revision):
@@ -96,6 +111,17 @@ def guard_flush(session, flush_context, instances):
     if permit is None or permit['consumed']:
         raise HTTPException(403, 'native_writer_permit_required')
     payload = permit['payload']
+    if payload.get('operation')=='chat-delta':
+        from ai_firewall.history_delta import digest,changed_fields
+        if len(payload['before'])!=len(rows) or len(payload['delta'])!=len(rows):raise HTTPException(403,'native_delta_count')
+        for index,item in enumerate(payload['before']):
+            row=next((r for r in rows if r.__table__.name==item['table'] and r.id==item['id']),None)
+            if row is None:raise HTTPException(403,'native_delta_row_missing')
+            old=None
+            if row not in session.new:
+                old=dict(session.connection().execute(row.__table__.select().where(row.__table__.c.id==row.id)).mappings().one())
+            if digest(old)!=item['digest']:raise HTTPException(409,'native_delta_base_changed')
+            if changed_fields(old or {},snapshot(row))!=payload['delta'][index]:raise HTTPException(403,'native_delta_mismatch')
     if payload.get('operation')=='chat-delete':
         from ai_firewall.delete_contract import validate_delete
         validate_delete(payload)
