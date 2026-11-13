@@ -59,7 +59,7 @@ def test_incomplete_and_block_upload():
             page.goto('http://webui:8080/auth',wait_until='domcontentloaded')
             page.locator('input[name=email]').fill(identity['email']);page.locator('input[type=password]').first.fill(identity['password']);page.locator('button[type=submit]').click()
             expect(page.locator('#chat-input')).to_be_visible(timeout=40000)
-            for filename,action in [('bad.png','REVIEW'),('corrupt.pdf','REVIEW'),('secret.txt','BLOCK')]:
+            for filename,action in [('bad.png','TECHNICAL_FAILURE'),('corrupt.pdf','TECHNICAL_FAILURE'),('secret.txt','BLOCK')]:
                 with page.expect_response(lambda r:'/api/v1/files/native' in r.url,timeout=125000) as uploaded:
                     with page.expect_file_chooser() as chooser:
                         page.get_by_role('button',name='Прикрепить файл · DLP + OCR',exact=True).click()

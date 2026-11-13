@@ -1,0 +1,97 @@
+From 4afecbe7e506e3aec514ea95f01361f79250c26f Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 12:20:37 +0300
+Subject: [PATCH] Stage DLP status interface and safe file refusal explanations
+
+---
+ src/lib/components/chat/MessageInput.svelte   |  2 +-
+ src/routes/(app)/admin/+layout.svelte         |  3 +-
+ .../(app)/admin/dlp-status/+page.svelte       | 41 +++++++++++++++++++
+ 3 files changed, 44 insertions(+), 2 deletions(-)
+ create mode 100644 src/routes/(app)/admin/dlp-status/+page.svelte
+
+diff --git a/src/lib/components/chat/MessageInput.svelte b/src/lib/components/chat/MessageInput.svelte
+index b952e0566..07edfe201 100644
+--- a/src/lib/components/chat/MessageInput.svelte
++++ b/src/lib/components/chat/MessageInput.svelte
+@@ -1281,7 +1281,7 @@
+     const response=await fetch('/api/v1/files/native',{method:'POST',headers:{Authorization:`Bearer ${localStorage.token}`,'X-Chat-ID':nativeScope,'X-File-Extension':file.name.split('.').pop()?.toLowerCase()??''},body:file});
+     if(!response.ok)throw new Error(`Безопасная обработка недоступна (${response.status})`);
+     const result=await response.json();
+-    item.id=result.id??item.id;item.action=result.action;item.categories=result.categories??[];item.status=result.status==='ready'?'ready':'denied';item.blocks=result.blocks??[];item.reason=result.reasons?.join(', ');
++    item.id=result.id??item.id;item.action=result.action;item.categories=result.categories??[];item.status=result.status==='ready'?'ready':'denied';item.blocks=result.blocks??[];item.reason=[result.message,result.reason_code,result.event_id].filter(Boolean).join(' · ');
+    }catch(e){item.status='denied';item.action='REVIEW';item.reason='Ошибка или лимит обработки';}
+    files=[...files];
+   }
+diff --git a/src/routes/(app)/admin/+layout.svelte b/src/routes/(app)/admin/+layout.svelte
+index dd802d740..f71c14c69 100644
+--- a/src/routes/(app)/admin/+layout.svelte
++++ b/src/routes/(app)/admin/+layout.svelte
+@@ -15,7 +15,7 @@
+ 	onMount(async () => {
+ 		if ($user?.role !== 'admin') {
+ 			let auditor=false;
+-			if ($page.url.pathname==='/admin/dlp') {
++			if (['/admin/dlp','/admin/dlp-status'].includes($page.url.pathname)) {
+ 				const response=await fetch('/api/v1/dlp/policies',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.token}`},body:JSON.stringify({action:'view'})});
+ 				auditor=response.ok;
+ 			}
+@@ -71,6 +71,7 @@
+ 
+ 				<div class="flex w-full items-center">
+ 					<a class="px-3" href="/admin/dlp">DLP Policies</a>
++					<a class="px-3" href="/admin/dlp-status">DLP Status</a>
+ 					<div
+ 						class="flex min-w-0 mr-1.5 items-center gap-0.5 md:gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-normal bg-transparent py-1 touch-auto pointer-events-auto"
+ 					>
+diff --git a/src/routes/(app)/admin/dlp-status/+page.svelte b/src/routes/(app)/admin/dlp-status/+page.svelte
+new file mode 100644
+index 000000000..6efa31763
+--- /dev/null
++++ b/src/routes/(app)/admin/dlp-status/+page.svelte
+@@ -0,0 +1,41 @@
++<script lang="ts">
++ import {onMount} from 'svelte';
++ let state:any=null, selected:any=null, audit:any[]=[], error='', page=0, busy=false;
++ let filters:any={action:'',category:'',source:'',reason_code:'',policy_revision:'',user_id:'',since:'',until:'',sort:'desc'};
++ const labels:any={enabled:'Хранить отклонённые оригиналы',store_block:'Хранить BLOCK',store_review:'Хранить REVIEW',store_technical:'Хранить технические отказы',retention_days:'Срок хранения (дней)',max_bytes:'Максимальный размер (байт)',quota_bytes:'Квота (байт)'};
++ function headers(){return {Authorization:`Bearer ${localStorage.token}`,'Content-Type':'application/json'};}
++ async function request(url:string,options:any={}){const r=await fetch(url,{...options,headers:headers(),cache:'no-store'});if(!r.ok)throw Error(r.status===403?'Недостаточно прав.':`Операция недоступна (${r.status})`);return r.json();}
++ async function load(){busy=true;error='';try{const q=new URLSearchParams({page:String(page)});for(const [k,v] of Object.entries(filters)){if(v)q.set(k,['since','until'].includes(k)?String(new Date(String(v)).getTime()/1000):String(v));}state=await request('/api/v1/dlp/status?'+q);}catch(e){error=String(e);}finally{busy=false;}}
++ async function open(id:string){try{const r=await request('/api/v1/dlp/status/'+id);selected=r.event;audit=r.audit;}catch(e){error=String(e);}}
++ async function save(){try{await request('/api/v1/dlp/status/settings',{method:'POST',body:JSON.stringify(state.settings)});await load();}catch(e){error=String(e);}}
++ async function original(){if(!confirm('Оригинал может содержать конфиденциальные данные и опасное активное содержимое. Выдаётся только как скачивание. Не открывайте в неизолированном приложении. Авторизованный получатель может сохранить или скопировать файл. Продолжить?'))return;
++  try{const r=await fetch('/api/v1/dlp/status/'+selected.event_id+'/evidence',{method:'POST',headers:headers(),cache:'no-store'});if(!r.ok)throw Error('Просмотр недоступен ('+r.status+')');const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='protected-evidence.'+selected.extension;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);await open(selected.event_id);}catch(e){error=String(e);}}
++ onMount(load);
++</script>
++
++<div class="overflow-y-auto w-full p-6 space-y-5" data-testid="dlp-status">
++ <h1 class="text-2xl font-semibold">DLP Status</h1>
++ <p>Журнал решений без исходного текста. Технический отказ — не REVIEW по содержимому.</p>
++ {#if error}<p role="alert" class="text-red-600">{error}</p>{/if}
++ {#if state}
++ <div class="flex flex-wrap gap-4">{#each Object.entries(state.counts) as [action,count]}<div class="rounded-xl border p-4"><strong>{action}</strong><p class="text-2xl">{count}</p></div>{/each}</div>
++ <details class="border rounded-xl p-4"><summary>Динамика по дням и категории</summary><div class="flex gap-8"><div>{#each Object.entries(state.timeline).sort() as [day,count]}<p>{day}: {count}</p>{/each}</div><div>{#each Object.entries(state.categories) as [category,count]}<p>{category}: {count}</p>{/each}</div></div></details>
++ <form class="flex flex-wrap gap-3" on:submit|preventDefault={()=>{page=0;load();}}>
++ {#each ['user_id','action','category','source','reason_code','policy_revision'] as key}<label class="text-sm">{key}<input aria-label={key} class="block border rounded-lg p-2 bg-transparent" bind:value={filters[key]}/></label>{/each}
++ {#each ['since','until'] as key}<label>{key}<input aria-label={key} type="datetime-local" class="block border rounded-lg p-2 bg-transparent" bind:value={filters[key]}/></label>{/each}
++ <select aria-label="Порядок времени" class="border rounded-lg bg-transparent" bind:value={filters.sort}><option value="desc">Новые сначала</option><option value="asc">Старые сначала</option></select>
++ <button class="border rounded-lg p-2" disabled={busy}>Применить фильтры</button>
++ </form>
++ <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr>{#each ['Время','Пользователь','Источник','Файл','Категории','Решение','Причина','Политика','Evidence'] as label}<th class="p-2 text-left">{label}</th>{/each}</tr></thead><tbody>
++ {#each state.events as event}<tr class="border-t hover:bg-gray-100 dark:hover:bg-gray-850"><td class="p-2"><button class="underline" on:click={()=>open(event.event_id)}>{new Date(event.timestamp*1000).toLocaleString()}</button></td><td>{event.user_id}</td><td>{event.source}</td><td>{event.file_reference??'CHAT'}</td><td>{event.categories.join(', ')}</td><td>{event.action}</td><td>{event.reason_code}</td><td>{event.policy_version??'—'}<br/>{event.policy_revision}</td><td>{event.evidence.status}</td></tr>{/each}
++ </tbody></table></div>
++ <div class="flex gap-4"><button disabled={page===0} on:click={()=>{page--;load();}}>Назад</button><span>{page+1} · всего {state.total}</span><button disabled={(page+1)*25>=state.total} on:click={()=>{page++;load();}}>Далее</button></div>
++ {#if selected}<section class="border rounded-xl p-4 space-y-3" data-testid="dlp-event-detail"><div class="flex justify-between"><h2 class="text-xl">Событие {selected.event_id}</h2><button on:click={()=>selected=null}>Закрыть</button></div><strong>{selected.action} · {selected.reason_code}</strong><p>Категории: {selected.categories.join(', ')||'не предоставлены'}</p><p>Политика: {selected.policy_version??'—'} / {selected.policy_revision??'—'}</p><p>Mock: {selected.mock_result} · Extraction: {selected.extraction_status} · {selected.processing_ms} мс</p>
++ <h3>Правила и детекторы</h3>{#each selected.findings as finding}<p>{finding.category} · {finding.rule_id} · {finding.detector} · confidence: {finding.confidence??'не предоставлен'} · {finding.block}</p>{/each}
++ <details><summary>Метаданные файла, OCR и блоки</summary><pre class="whitespace-pre-wrap break-all text-xs">{JSON.stringify(selected,null,2)}</pre></details>
++ <p>Защищённый оригинал: {selected.evidence.status}</p>
++ {#if state.can_view_evidence && selected.evidence.status==='STORED'}<button class="border rounded-lg p-2" on:click={original}>Просмотреть оригинал</button><p class="text-sm">Контролируемая выдача как скачивание; в браузере активное содержимое не открывается.</p>{/if}
++ <h3>Аудит доступа</h3>{#each audit as entry}<p>{new Date(entry.timestamp*1000).toLocaleString()} · {entry.actor} · {entry.operation} · {entry.result}</p>{/each}</section>{/if}
++ {#if state.can_edit}<details class="border rounded-xl p-4"><summary>Настройки Evidence Vault</summary><p class="my-3">По умолчанию retention выключен. Включение — явное административное действие. Изменение TTL применяется к новым объектам.</p><div class="space-y-3">{#each Object.keys(labels) as key}<label class="block">{labels[key]} {#if typeof state.settings[key]==='boolean'}<input type="checkbox" bind:checked={state.settings[key]}/>{:else}<input type="number" class="border rounded-lg p-2 bg-transparent" bind:value={state.settings[key]}/>{/if}</label>{/each}<button class="border rounded-lg p-2" on:click={save}>Сохранить настройки хранения</button></div></details>{/if}
++ {/if}
++</div>
+\ No newline at end of file
+-- 
+2.34.1
+

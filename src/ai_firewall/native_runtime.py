@@ -17,6 +17,8 @@ from ai_firewall.native_writer import install, protect_database
 # closed until permitted native lifecycle writes have their own acceptance.
 install()
 from ai_firewall.native_http import router as native_router
+from ai_firewall.dlp_status_http import router as status_router
+native_router.include_router(status_router)
 upstream.include_router(native_router)
 # Upstream mounts its SPA at '/'; native routes must precede that catch-all.
 native_paths = {route.path for route in native_router.routes}
@@ -34,7 +36,30 @@ async def guarded_lifespan(app):
     from open_webui.internal.db import async_engine
     await protect_database(async_engine)
     async with original_lifespan(app) as state:
-        yield state
+        import asyncio
+        from ai_firewall.dlp_status_http import vault
+        from ai_firewall import dlp_events as events
+        events.reconcile_pending()
+        async def sweep():
+            while True:
+                try:
+                    response=await vault('cleanup',json={})
+                    if response.status_code==200:
+                        import time
+                        with events.database() as db:
+                            for identifier,body in db.execute('SELECT id,body FROM events').fetchall():
+                                event=json.loads(body);evidence=event.get('evidence',{})
+                                if evidence.get('status')=='STORED' and evidence.get('expires',0)<=time.time():
+                                    event['evidence']={'status':'EXPIRED'}
+                                    db.execute('UPDATE events SET body=? WHERE id=?',(json.dumps(event),identifier))
+                except Exception:pass
+                await asyncio.sleep(60)
+        task=asyncio.create_task(sweep())
+        try:yield state
+        finally:
+            task.cancel()
+            try:await task
+            except asyncio.CancelledError:pass
 
 
 upstream.router.lifespan_context = guarded_lifespan
@@ -80,10 +105,10 @@ class StagedNative:
                            '/api/v1/skills/'}
         if native_enabled and method == 'GET' and path in empty_discovery:
             return await JSONResponse([], headers={'Cache-Control': 'no-store'})(scope, receive, send)
-        native_get = (path in {'/api/models/native', '/api/v1/chats/native/list', '/api/v1/users/', '/api/v1/groups/'}
+        native_get = (re.fullmatch(r'/api/v1/dlp/status(?:/[a-f0-9-]{36})?',path) or path in {'/api/models/native', '/api/v1/chats/native/list', '/api/v1/users/', '/api/v1/groups/'}
                       or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}(?:/native)?', path))
         native_delete = method == 'DELETE' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}', path)
-        native_post = (path in {'/api/chat/completions/native','/api/v1/dlp/policies','/api/v1/files/native'} or
+        native_post = (path=='/api/v1/dlp/status/settings' or re.fullmatch(r'/api/v1/dlp/status/[a-f0-9-]{36}/evidence',path) or path in {'/api/chat/completions/native','/api/v1/dlp/policies','/api/v1/files/native'} or
                        re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/native/reveal', path))
         if not ((method == 'GET' and (public_get or static_get)) or (method == 'POST' and auth_post)
                 or (native_enabled and ((method == 'GET' and native_get) or (method == 'POST' and native_post) or native_delete))):

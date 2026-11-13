@@ -151,4 +151,39 @@ def cleanup_expired(request:Request,data:dict):
     return {'deleted_count':len(rows)}
 
 
-app=harden(app)
+@app.post('/evidence/store')
+async def evidence_store(request:Request):
+    authorize(request,'VAULT_WRITE_KEY_FILE')
+    from ai_firewall.evidence_vault import store
+    try:
+        context=json.loads(request.headers['X-Evidence-Context'])
+        limits=json.loads(request.headers['X-Evidence-Limits'])
+        raw=bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw)>min(limits['max_bytes'],10485760):raise ValueError()
+        return store(bytes(raw),context,limits,bao)
+    except Exception:raise HTTPException(503,'evidence_store_failed') from None
+
+
+@app.post('/evidence/read')
+def evidence_read(request:Request,data:dict):
+    authorize(request,'VAULT_REVEAL_KEY_FILE')
+    from ai_firewall.evidence_vault import retrieve
+    from starlette.responses import Response
+    try:
+        raw,metadata=retrieve(data['id'],data['event_id'],data['actor'],bao)
+        return Response(raw,media_type='application/octet-stream',headers={'Cache-Control':'no-store',
+            'X-Content-Type-Options':'nosniff','Content-Disposition':'attachment; filename="evidence.bin"'})
+    except Exception:raise HTTPException(404,'evidence_unavailable') from None
+
+
+@app.post('/evidence/cleanup')
+def evidence_cleanup(request:Request):
+    authorize(request,'VAULT_WRITE_KEY_FILE')
+    from ai_firewall.evidence_vault import database,cleanup
+    with database() as db:cleanup(db)
+    return {'status':'COMPLETE'}
+
+
+app=harden(app,body_limit=10485760)

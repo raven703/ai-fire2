@@ -55,6 +55,7 @@ services:
       - ./artifacts/vault-v2-secrets/vault-decrypt:/run/secrets/bao-decrypt:ro
       - ./artifacts/vault-v2-secrets/write-key:/run/secrets/write-key:ro
       - ./artifacts/vault-v2-secrets/reveal-key:/run/secrets/reveal-key:ro
+      - evidence-ciphertext:/evidence
     read_only: true
     tmpfs: [/tmp]
     mem_limit: 128m
@@ -64,5 +65,6 @@ networks:
   keys: {internal: true}
   client: {internal: true}
 volumes:
+  evidence-ciphertext:
   vault-v2-pg:
   vault-v2-bao:

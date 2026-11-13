@@ -37,7 +37,9 @@ async def call(url, data, secret, method='POST'):
         if response.status_code >= 400:
             if response.status_code == 403 and url.endswith('/inspect'):
                 verdict = response.json().get('detail')
-                if verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
+                if isinstance(verdict,dict) and verdict.get('action') in {'BLOCK','REVIEW'}:
+                    raise HTTPException(403,verdict)
+                if isinstance(verdict,str) and verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
             status = response.status_code if response.status_code in {403, 404, 409} else 502
             raise HTTPException(status, 'dependency_denied')
         return response.json()
@@ -243,6 +245,7 @@ def gateway_app():
             (['SYNTHETIC_PII'] if result['action'] == 'MASK' and not (nlp and nlp['categories']) else [])))
         result['policy_version'] = nlp['policy_version'] if nlp else 'synthetic-v2'
         result['policy_revision'] = nlp.get('policy_revision') if nlp else None
+        result['findings'] = nlp.get('findings',[]) if nlp else []
         return result
 
     async def scan(text, user, chat):

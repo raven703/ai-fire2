@@ -138,23 +138,60 @@ async def file_upload(request:Request,user=Depends(get_verified_user)):
     existing=await Chats.get_chat_by_id(chat_id)
     if existing is not None and existing.user_id!=user.id:raise HTTPException(404,'native_chat_not_found')
     extension=request.headers.get('X-File-Extension','')
+    if extension not in {'pdf','docx','xlsx','txt','png','jpg','jpeg','tif','tiff','webp'}:extension='unsupported'
+    import hashlib,time
+    from ai_firewall import dlp_events as events
+    from ai_firewall.dlp_status_http import retain
+    started=time.monotonic();raw=await request.body()
+    source=extension.upper() if extension in {'pdf','docx','xlsx','txt'} else 'IMAGE'
+    event=events.create(user_id=user.id,chat_id=chat_id,source=source,extension=extension,
+        file_reference='protected-upload',sha256=hashlib.sha256(raw).hexdigest(),size=len(raw),
+        action='TECHNICAL_FAILURE',reason_code='PROCESSING_INTERRUPTED',policy_revision=None,
+        policy_version=None,extraction_status='PENDING',blocks=[],processing_ms=0)
+    async def finish(action,reason,status,diagnostics=None,**extra):
+        diagnostics=diagnostics or {}
+        event.update(action=action,reason_code=reason,processing_ms=round((time.monotonic()-started)*1000),
+            categories=diagnostics.get('categories') or [],findings=diagnostics.get('findings') or [],
+            policy_version=diagnostics.get('policy_version'),match_count=len(diagnostics.get('findings') or []))
+        events.put(event)
+        await retain(event,raw)
+        message=('Документ не отправлен: не удалось полностью проверить содержимое.' if action=='TECHNICAL_FAILURE'
+            else 'Документ не отправлен: требуется проверка по политике DLP.' if action=='REVIEW'
+            else 'Документ не отправлен: содержимое запрещено политикой DLP.' if action=='BLOCK'
+            else 'Документ проверен политикой DLP.')
+        return dict(action=action,reason_code=reason,event_id=event['event_id'],message=message,
+            categories=event['categories'],status=status,**extra)
     # Query policy before extraction so the complete lifecycle pins one revision.
-    async with httpx.AsyncClient(timeout=115,trust_env=False) as client:
-        policy=await client.post(os.environ['DLP_POLICY_URL']+'/policy-manager',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY']},json={'action':'view','actor':user.id})
-        if policy.status_code!=200:raise HTTPException(503,'policy_service_unavailable')
-        pinned=policy.json()['active']
-        result=await client.post(os.environ['NATIVE_FILE_OCR_URL']+'/extract',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY'],'X-File-Extension':extension},content=await request.body())
-    if result.status_code!=200:return {'action':'REVIEW','categories':[],'reasons':['extraction_unavailable'],'status':'incomplete'}
-    extracted=result.json()
-    if extracted['status']!='COMPLETE':return {'action':'REVIEW','categories':[],'reasons':extracted['reasons'],'status':'incomplete'}
+    try:
+        async with httpx.AsyncClient(timeout=115,trust_env=False) as client:
+            policy=await client.post(os.environ['DLP_POLICY_URL']+'/policy-manager',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY']},json={'action':'view','actor':user.id})
+            policy.raise_for_status();pinned=policy.json()['active'];event['policy_revision']=pinned
+            result=await client.post(os.environ['NATIVE_FILE_OCR_URL']+'/extract',headers={'Authorization':'Bearer '+os.environ['NATIVE_GATEWAY_KEY'],'X-File-Extension':extension},content=raw)
+        extracted=result.json() if result.status_code==200 else {'status':'INCOMPLETE','reasons':[str(result.json().get('detail','extraction_unavailable'))]}
+    except Exception:
+        return await finish('TECHNICAL_FAILURE','DEPENDENCY_UNAVAILABLE','incomplete')
+    event['extraction_status']=extracted['status']
+    if extracted['status']!='COMPLETE':
+        codes={'low_ocr_confidence':'OCR_LOW_CONFIDENCE','empty_ocr':'OCR_EMPTY','no_readable_text':'OCR_EMPTY',
+            'text_limit':'TEXT_LIMIT_EXCEEDED','page_limit':'PAGE_LIMIT_EXCEEDED','frame_limit':'PAGE_LIMIT_EXCEEDED',
+            'encrypted_or_page_limit':'ENCRYPTED_OR_PAGE_LIMIT','file_too_large':'FILE_TOO_LARGE',
+            'extraction_failed':'PARSER_ERROR','unsupported_format':'UNSUPPORTED_CONTENT','ocr_worker_busy':'OCR_WORKER_BUSY'}
+        reasons=extracted.get('reasons',[])
+        reason=next((codes[r] for r in reasons if r in codes),'EXTRACTION_INCOMPLETE')
+        event['extraction_reasons']=[codes.get(r,'EXTRACTION_INCOMPLETE') for r in reasons]
+        return await finish('TECHNICAL_FAILURE',reason,'incomplete')
     blocks=extracted['blocks']
+    event['blocks']=[{'block':f'block_{i}','part':i+1,'page':int(m[1]) if (m:=re.search(r'(?:page|frame)/(\d+)',b['source'])) else None,
+        'method':b.get('method'),'confidence':b.get('confidence'),'status':b.get('status')} for i,b in enumerate(blocks)]
     fields={f'block_{i}':block['text'] for i,block in enumerate(blocks)}
     check=inspector();check.policy_revision=pinned
     try:
         verdict=await check.inspect(fields,user.id,chat_id,'input',revision({}),receipt=True)
     except HTTPException as exc:
-        if exc.status_code==403:return {'action':exc.detail if exc.detail in {'BLOCK','REVIEW'} else 'REVIEW','categories':[],'reasons':['policy_denied'],'status':'denied'}
-        raise
+        event['correlation_id']=getattr(check,'correlation_id',event['correlation_id'])
+        if exc.status_code==403 and exc.detail in {'BLOCK','REVIEW'}:
+            return await finish(exc.detail,'POLICY_'+exc.detail,'denied',check.diagnostics)
+        return await finish('TECHNICAL_FAILURE','DEPENDENCY_UNAVAILABLE','incomplete')
     from ai_firewall.file_admission import save
     # Never return raw OCR text/word strings or user-controlled filenames.
     metadata=[]
@@ -166,8 +203,10 @@ async def file_upload(request:Request,user=Depends(get_verified_user)):
             'method':block.get('method'),'confidence':block.get('confidence'),'variant':block.get('variant'),
             'status':block.get('status'),'boxes':[w['bbox'] for w in block.get('words',[])],
             'word_confidence':[w['confidence'] for w in block.get('words',[])]})
+    event['blocks']=metadata
+    event['correlation_id']=check.correlation_id
     identifier=save(user.id,chat_id,pinned,verdict['payload']['fields'],metadata)
-    return {'id':identifier,'chat_id':chat_id,'action':verdict['action'],'categories':verdict.get('categories',[]),'policy_revision':pinned,'status':'ready','blocks':metadata}
+    return await finish(verdict['action'],'POLICY_'+verdict['action'],'ready',verdict,id=identifier,chat_id=chat_id,policy_revision=pinned,blocks=metadata)
 
 
 class Turn(BaseModel):
@@ -261,4 +300,13 @@ async def file_turn(body: Turn,user):
         # Clean input is committed. Return only this known canonical snapshot,
         # never provider bodies or unchecked output, so UI can recover/reload.
         error = exception.detail
+    from ai_firewall import dlp_events as events
+    import json
+    # Only admitted events for this owned chat can be marked as passed to Mock.
+    with events.database() as db:
+        for identifier,encoded in db.execute('SELECT id,body FROM events').fetchall():
+            event=json.loads(encoded)
+            if event.get('chat_id')==state.id and event['action'] in {'ALLOW','MASK'} and event.get('mock_result')=='NOT_SENT':
+                event['mock_result']='COMPLETED' if error is None else 'FAILED_OR_REFUSED'
+                db.execute('UPDATE events SET body=? WHERE id=?',(json.dumps(event),identifier))
     return {'chat': state.model_dump(), 'revision': revision(state.chat), 'error': error}

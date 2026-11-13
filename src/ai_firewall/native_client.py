@@ -25,6 +25,8 @@ class NativeInspector:
 
     async def inspect(self, fields, user, chat, operation, revision, *, receipt=False):
         correlation=uuid4().hex
+        self.correlation_id=correlation
+        self.diagnostics={}
         started=time.monotonic()
         status=503
         payload = dict(fields=fields, user=user, chat=chat, operation=operation, revision=revision)
@@ -39,9 +41,13 @@ class NativeInspector:
                 if response.status_code == 403:
                     try: verdict = response.json().get('detail')
                     except Exception: verdict = None
-                    if verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
+                    if isinstance(verdict,dict) and verdict.get('action') in {'BLOCK','REVIEW'}:
+                        self.diagnostics=verdict
+                        raise HTTPException(403,verdict['action'])
+                    if isinstance(verdict,str) and verdict in {'BLOCK', 'REVIEW'}: raise HTTPException(403, verdict)
                 raise HTTPException(403 if response.status_code == 403 else 503, 'native_inspection_denied')
             result = response.json()
+            self.diagnostics={k:result.get(k) for k in ('action','categories','findings','policy_version','policy_revision')}
             policy_revision=result.get('policy_revision')
             if self.policy_revision and policy_revision!=self.policy_revision:
                 raise ValueError('policy_revision_changed')
@@ -60,6 +66,17 @@ class NativeInspector:
         except Exception:
             raise HTTPException(503, 'native_inspection_unavailable') from None
         finally:
+            # Native runtime only: standalone gateway/unit images have no events DB.
+            if operation=='input' and __import__('os').getenv('FIREWALL_NATIVE_HTTP')=='true':
+                from ai_firewall import dlp_events as events
+                d=self.diagnostics
+                event=events.create(user_id=user,chat_id=chat,source='CHAT',
+                    action=d.get('action') or 'TECHNICAL_FAILURE',reason_code=('POLICY_'+d['action']) if d.get('action') else 'DEPENDENCY_UNAVAILABLE',
+                    policy_version=d.get('policy_version'),policy_revision=d.get('policy_revision'),
+                    processing_ms=round((time.monotonic()-started)*1000))
+                event.update(correlation_id=correlation,categories=d.get('categories') or [],
+                    findings=d.get('findings') or [],match_count=len(d.get('findings') or []))
+                events.put(event)
             logging.getLogger('uvicorn.error').warning(
                 'dlp_trace correlation=%s stage=%s status=%s duration_ms=%s source=gateway',
                 correlation,operation,status,round((time.monotonic()-started)*1000))

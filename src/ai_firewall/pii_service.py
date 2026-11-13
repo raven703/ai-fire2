@@ -82,7 +82,14 @@ def inspect(request: Request, data: dict):
         pipeline=DetectorPipeline([*worker.state.base.detectors,*policy.detectors])
         action,decisions=inspect_object(values,pipeline,policy,
             PolicyContext('synthetic-test','synthetic-test',data['operation'],policy.version))
-        if action in {Action.BLOCK,Action.REVIEW}: raise HTTPException(403,action.value)
+        # Metadata never contains text, offsets, dictionary entries or patterns.
+        findings=[{'block':name,'category':f.entity_type,'detector':f.source,
+            'confidence':f.confidence,'rule_id':policy_revision+':'+f.entity_type}
+            for name,d in decisions.items() for s in d.spans for f in s.findings]
+        diagnostics={'findings':findings,'categories':sorted({f['category'] for f in findings}),
+            'policy_version':policy.version,'policy_revision':policy_revision}
+        if action in {Action.BLOCK,Action.REVIEW}:
+            raise HTTPException(403,{'action':action.value,**diagnostics})
         cleaned=dict(values); categories=set()
         for name,decision in decisions.items():
             for span in reversed(decision.spans):
@@ -96,7 +103,7 @@ def inspect(request: Request, data: dict):
             selected=[values[name][s.start:s.end] for name in sorted(values) for s in decisions[name].spans]
             proof=issue(Path(os.environ['MASK_ATTESTATION_KEY_FILE']).read_text().strip(),data['user'],data['chat'],policy_revision,selected,
                 synthetic=os.getenv('DLP_SYNTHETIC_EXERCISE')=='true')
-        return {'mask_approval':proof,'fields':cleaned,'action':action.value,'categories':sorted(categories),'policy_version':policy.version,'policy_revision':policy_revision,
+        return {**diagnostics,'mask_approval':proof,'fields':cleaned,'action':action.value,'categories':sorted(categories),'policy_version':policy.version,'policy_revision':policy_revision,
             'spans':{name:[{'start':s.start,'end':s.end} for s in decision.spans] for name,decision in decisions.items()}}
     except HTTPException: raise
     except Exception: raise HTTPException(503,'mandatory_nlp_failed') from None

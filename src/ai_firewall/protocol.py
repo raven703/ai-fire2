@@ -49,7 +49,7 @@ def text(value):
     return value
 
 
-def harden(app):
+def harden(app, *, body_limit=262144):
     """Bound body before parsing and never return/log exception payloads."""
     @app.exception_handler(Exception)
     async def unexpected(request, error):
@@ -73,7 +73,7 @@ def harden(app):
                 if event['type'] == 'http.disconnect':
                     return
                 body.extend(event.get('body', b''))
-                if len(body) > 262144:
+                if len(body) > body_limit:
                     return await JSONResponse({'detail': 'body_too_large'}, status_code=413)(scope, receive, send)
                 if not event.get('more_body'):
                     break

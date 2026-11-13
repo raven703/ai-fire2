@@ -5,7 +5,7 @@
   "local_path": "forks/open-webui",
   "development_branch": "firewall/native-core",
   "poc_commit": "eab205a",
-  "fork_commit": "73908070734038b08e986476186186ddb4d0432b",
+  "fork_commit": "4afecbe7e506e3aec514ea95f01361f79250c26f",
   "patch_series": [
     "patches/native/0001-native-core-staged.patch",
     "patches/native/0002-bounded-rollup-build.patch",
@@ -22,7 +22,8 @@
     "patches/native/0013-dlp-discard-rules.patch",
     "patches/native/0014-dlp-version-delete-audit.patch",
     "patches/native/0015-dlp-bulk-delete-filter.patch",
-    "patches/native/0016-file-dlp-ocr-composer.patch"
+    "patches/native/0016-file-dlp-ocr-composer.patch",
+    "patches/native/0017-dlp-status-evidence.patch"
   ],
   "stage": "policy-manager-deployed-synthetic-browser-verified"
 }
