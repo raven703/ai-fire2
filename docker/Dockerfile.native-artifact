@@ -1,0 +1,8 @@
+# No Node, npm, Vite or Svelte build in local deployment.
+FROM ghcr.io/open-webui/open-webui:v0.13.3@sha256:46b59158e6558eeb980bc828e0f1b30238ad24d82ed84d5e5eda1dab2a082f14
+COPY artifacts/frontend-stage/build /app/build
+COPY artifacts/frontend-stage/build-manifest.json /app/frontend-build-manifest.json
+COPY forks/open-webui/backend/open_webui /app/backend/open_webui
+COPY src/ai_firewall /app/backend/ai_firewall
+ENV OFFLINE_MODE=true HF_HUB_OFFLINE=1 RAG_EMBEDDING_MODEL_AUTO_UPDATE=false
+ENTRYPOINT ["uvicorn", "ai_firewall.native_runtime:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
