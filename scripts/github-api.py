@@ -5,6 +5,13 @@ import subprocess
 import sys
 import urllib.request
 
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        redirected=super().redirect_request(req,fp,code,msg,headers,newurl)
+        if redirected is not None:
+            redirected.remove_header('Authorization')
+        return redirected
+
 def token():
     value=os.getenv('GH_TOKEN') or os.getenv('GITHUB_TOKEN')
     if value:return value
@@ -21,7 +28,7 @@ def request(path,method='GET',data=None,binary=False):
         data=json.dumps(data).encode() if data is not None else None,method=method,
         headers={'Authorization':'Bearer '+token(),'Accept':'application/vnd.github+json',
             'X-GitHub-Api-Version':'2022-11-28','User-Agent':'ai-fire2-deployment'})
-    with urllib.request.urlopen(req,timeout=90) as r:raw=r.read()
+    with urllib.request.build_opener(SafeRedirect()).open(req,timeout=90) as r:raw=r.read()
     return raw if binary else json.loads(raw) if raw else {}
 
 if __name__=='__main__':
