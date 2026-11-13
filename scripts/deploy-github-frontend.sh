@@ -38,7 +38,15 @@ mkdir -m 700 "$backup"
 services=(webui gateway pii)
 containers=(ai-fire2-native-webui-1 ai-fire2-native-gateway-1 ai-fire2-native-pii-1)
 for i in "${!services[@]}"; do
-  docker image tag "$(docker inspect "${containers[$i]}" --format '{{.Image}}')" "ai-fire2-rollback:${services[$i]}-$stamp"
+  current=$(docker inspect "${containers[$i]}" --format '{{.Image}}')
+  target="ai-fire2-rollback:${services[$i]}-$stamp"
+  if docker image inspect "$current" >/dev/null 2>&1; then
+    docker image tag "$current" "$target"
+  else
+    # A previous build may have replaced an image tag while the old container ran.
+    # Commit its root filesystem; mounted persistent data is deliberately excluded.
+    docker commit "${containers[$i]}" "$target" > "$backup/${services[$i]}-snapshot.log"
+  fi
 done
 # Keep existing auditor configuration; never infer permissions from a new shell env.
 export DLP_AUDITOR_IDS
