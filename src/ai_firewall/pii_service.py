@@ -41,11 +41,14 @@ worker=app
 @app.post('/policy-manager')
 def manage_policy(request:Request,data:dict):
     auth(request,'NATIVE_GATEWAY_KEY')
-    schema(data,{'action','actor'}, {'policy','id','expected'})
+    schema(data,{'action','actor'}, {'policy','id','ids','expected'})
     store=worker.state.policy_store
     try:
         if data['action']=='view': return store.view()
         if data['action']=='draft': return {'id':store.draft(data['policy'],data['actor'])}
+        if data['action']=='delete_versions':
+            store.delete_versions(data['ids'],data['actor'],data['expected'])
+            return {'deleted':True}
         if data['action']=='delete_version':
             store.delete_version(data['id'],data['actor'],data['expected'])
             return {'deleted':True}

@@ -47,10 +47,30 @@ def test_delete_archived_version_and_collapse_audit():
                 with page.expect_response(lambda r:'/api/v1/dlp/policies' in r.url and r.request.post_data_json.get('action')=='delete_version') as response:
                     rows.first.get_by_role('button',name='Удалить версию',exact=True).click()
                 assert response.value.status==200
+                expect(rows).to_have_count(0)
+                page.get_by_label("Показать удалённые",exact=True).check()
                 expect(rows).to_have_count(3)
                 for row in rows.all():
                     expect(row.get_by_role('button',name='Восстановить версию')).to_be_disabled()
                     expect(row.get_by_role('button',name='Удалить версию',exact=True)).to_be_disabled()
+                page.get_by_label('Показать удалённые',exact=True).uncheck()
+                bulk=[]
+                for _ in range(2):
+                    result=api.post('/api/v1/dlp/policies',headers=admin,json={'action':'draft','policy':initial['policy']})
+                    result.raise_for_status();bulk.append(result.json()['id'])
+                api.post('/api/v1/dlp/policies',headers=admin,json={'action':'discard','id':bulk[-1],'expected':initial['active']}).raise_for_status()
+                page.reload(wait_until='domcontentloaded')
+                page.get_by_role('button',name='Показать журнал аудита',exact=True).click()
+                for identifier in bulk:
+                    page.get_by_label('Выбрать версию '+identifier,exact=True).first.check()
+                expect(page.get_by_role('button',name='Удалить выбранные (2)',exact=True)).to_be_enabled()
+                page.once('dialog',lambda d:d.accept())
+                with page.expect_response(lambda r:'/api/v1/dlp/policies' in r.url and r.request.post_data_json.get('action')=='delete_versions') as deleted:
+                    page.get_by_role('button',name='Удалить выбранные (2)',exact=True).click()
+                assert deleted.value.status==200
+                for identifier in bulk:
+                    expect(page.locator('.history-row').filter(has_text=identifier)).to_have_count(0)
+                expect(page.get_by_role('button',name='Удалить выбранные (0)',exact=True)).to_be_disabled()
                 page.get_by_role('button',name='Скрыть журнал аудита',exact=True).click()
                 expect(page.locator('#dlp-audit-log')).to_have_count(0)
             finally:browser.close()

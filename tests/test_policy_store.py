@@ -77,3 +77,22 @@ def test_delete_archived_version_preserves_audit_and_protects_pointers(tmp_path)
     with pytest.raises(ValueError):store.snapshot(draft)
     with pytest.raises(ValueError):store.publish(draft,'admin',initial['active'])
     with pytest.raises(ValueError):store.delete_version(draft,'admin',initial['active'])
+
+def test_bulk_delete_is_atomic(tmp_path):
+    import yaml
+    baseline=tmp_path/'baseline.yaml'
+    baseline.write_text(yaml.safe_dump(dict(version='test',rules=[dict(entity='PERSON',action='MASK',threshold=.5)],dictionaries={},regex=[])))
+    store=PolicyStore(str(tmp_path/'db'),baseline)
+    initial=store.view()
+    first=store.draft(initial['policy'],'admin')
+    second=store.draft(initial['policy'],'admin')
+    before=store.view()['history']
+    for selection in ([first,second],[first,'unknown'],[first,first],[]):
+        with pytest.raises(ValueError):store.delete_versions(selection,'admin',initial['active'])
+        assert store.snapshot(first)[0]==first
+        assert store.view()['history']==before
+    store.discard(second,'admin',initial['active'])
+    store.delete_versions([first,second],'admin',initial['active'])
+    for identifier in (first,second):
+        with pytest.raises(ValueError):store.snapshot(identifier)
+    assert store.view()['active']==initial['active']

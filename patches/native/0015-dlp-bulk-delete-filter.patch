@@ -1,0 +1,48 @@
+From a0a3f905d7073856f1eb00b7c6867a44941c99c7 Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 10:37:08 +0300
+Subject: [PATCH] Hide deleted policy history and add bulk version selection
+
+---
+ src/routes/(app)/admin/dlp/+page.svelte | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/routes/(app)/admin/dlp/+page.svelte b/src/routes/(app)/admin/dlp/+page.svelte
+index c08d2f1bd..9fd0aaded 100644
+--- a/src/routes/(app)/admin/dlp/+page.svelte
++++ b/src/routes/(app)/admin/dlp/+page.svelte
+@@ -1,7 +1,12 @@
+ <script lang="ts">
+  import { onMount } from 'svelte';
+  let state:any=null, editor:any=null;
+- let historyOpen=false;
++ let historyOpen=false, showDeleted=false;
++ let selected:string[]=[];
++ $: history=state?.history.filter((entry:any)=>showDeleted||entry.available!==false)??[];
++ $: selectable=[...new Set<string>(history.filter((entry:any)=>entry.available!==false&&entry.version!==state.active&&entry.version!==state.draft?.id).map((entry:any)=>entry.version))];
++ function selectVersion(id:string,checked:boolean){selected=checked?[...new Set([...selected,id])]:selected.filter(v=>v!==id);}
++ async function deleteSelected(){if(!selected.length||dirty||busy)return;if(!window.confirm(`Безвозвратно удалить выбранные версии (${selected.length})? Они исчезнут из списка. Аудит сохранится.`))return;busy=true;error="";try{await request({action:"delete_versions",ids:selected,expected:state.active});await refresh();notice="Выбранные версии удалены. Аудит сохранён.";}catch(e){error=e instanceof Error?e.message:String(e);}finally{busy=false;}}
+  let document='', saved='', error='', notice='', busy=false, loading=true, search='';
+  const names:Record<string,string>={PERSON:'Имена и фамилии',ORGANIZATION:'Организации',LOCATION:'Географические названия',EMAIL_ADDRESS:'Электронная почта',PHONE_NUMBER:'Номера телефонов',CREDIT_CARD:'Банковские карты',IP_ADDRESS:'IP-адреса',RU_INN:'ИНН',RU_SNILS:'СНИЛС',RU_PASSPORT:'Паспорт РФ',RU_BIC:'БИК банка',RU_BANK_ACCOUNT:'Банковские счета',CORPORATE_SECRET:'Коммерческая тайна',APPROVAL_REQUIRED:'Данные для согласования',RU_OGRN:'ОГРН',RU_OGRNIP:'ОГРНИП',DATE_OF_BIRTH:'Дата рождения',POSTAL_ADDRESS:'Почтовые адреса',API_KEY:'API-ключи',JWT:'JWT-токены',BEARER_TOKEN:'Токены доступа',PRIVATE_KEY:'Приватные ключи',PASSWORD:'Пароли',CONNECTION_STRING:'Строки подключения'};
+  const actions=[{id:'MASK',label:'Скрыть данные',description:'Заменить найденные значения защищёнными токенами.'},{id:'BLOCK',label:'Заблокировать',description:'Отклонить операцию при обнаружении данных.'},{id:'REVIEW',label:'Требовать согласования',description:'Остановить операцию с вердиктом REVIEW, а не пропускать автоматически.'},{id:'ALLOW',label:'Разрешить',description:'Не ограничивать эту категорию. Общая DLP-проверка остаётся обязательной.'}];
+@@ -14,7 +19,7 @@
+   if(!response.ok) throw new Error(response.status===409?'Политика уже изменена другим администратором. Обновите страницу перед публикацией.':response.status===403?'Недостаточно прав для этого действия.':response.status===400||response.status===422?'Настройки не прошли проверку. Проверьте пороги, словари и регулярные выражения.':`Не удалось выполнить действие (код ${response.status}). Повторите попытку.`);
+   return response.json();
+  }
+- async function refresh(){state=await request({action:'view'});editor=structuredClone(state.draft?.policy??state.policy);sync();saved=document;}
++ async function refresh(){state=await request({action:'view'});editor=structuredClone(state.draft?.policy??state.policy);sync();saved=document;selected=[];}
+  async function action(kind:string,id?:string){
+   busy=true;error='';notice='';
+   try{
+@@ -63,7 +68,7 @@
+    </fieldset>
+    {#if !state.can_edit}<p class="message">Режим аудитора: настройки доступны только для чтения. Сохранение и публикация запрещены.</p>{/if}
+    <section class="panel history"><div class="section-heading"><div><h2>История изменений</h2><p class="muted">Журнал аудита сохраняется даже после удаления старых версий настроек.</p></div><button class="secondary" aria-expanded={historyOpen} aria-controls="dlp-audit-log" on:click={()=>historyOpen=!historyOpen}>{historyOpen?'Скрыть журнал аудита':'Показать журнал аудита'}</button></div>
+-   {#if historyOpen}<div id="dlp-audit-log"><p class="hint">Удаление версии необратимо. Действующую версию и текущий черновик удалить здесь нельзя. События могут ссылаться на одну версию; её удаление отключает восстановление во всех таких событиях. Показаны последние {state.history.length} событий (не более 100).</p>{#each state.history as entry}<div class="history-row border-b"><div><strong>{entry.action==='delete_version'?'Удаление версии':entry.action==='discard'?'Удаление черновика':entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code>{#if entry.available===false}<span class="muted small">Версия удалена · восстановление недоступно</span>{/if}</div><div class="button-group"><button class="secondary" disabled={busy||!state.can_edit||entry.available===false||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button><button class="secondary" disabled={busy||dirty||!state.can_edit||entry.available===false||entry.version===state.active||entry.version===state.draft?.id} on:click={()=>deleteVersion(entry.version)}>Удалить версию</button></div></div>{/each}{#if !state.history.length}<p class="empty">История изменений пока пуста.</p>{/if}</div>{/if}</section>
++   {#if historyOpen}<div id="dlp-audit-log"><p class="hint">Удаление версии необратимо. Действующую версию и текущий черновик удалить здесь нельзя. События могут ссылаться на одну версию; её удаление отключает восстановление во всех таких событиях. Удалённые версии скрыты из списка. Показано {history.length} событий из последних 100.</p><div class="section-heading"><label class="category-name"><input type="checkbox" bind:checked={showDeleted}/>Показать удалённые</label><div class="button-group"><label class="category-name"><input type="checkbox" aria-label="Выбрать все доступные версии" disabled={busy||!state.can_edit||!selectable.length} checked={selectable.length>0&&selectable.every(id=>selected.includes(id))} indeterminate={selected.length>0&&!selectable.every(id=>selected.includes(id))} on:change={(event)=>selected=event.currentTarget.checked?[...selectable]:[]}/>Выбрать все</label><button class="secondary" disabled={busy||dirty||!state.can_edit||!selected.length} on:click={deleteSelected}>Удалить выбранные ({selected.length})</button></div></div>{#each history as entry}<div class="history-row border-b"><label class="category-name"><input type="checkbox" aria-label={`Выбрать версию ${entry.version}`} disabled={busy||!state.can_edit||entry.available===false||entry.version===state.active||entry.version===state.draft?.id} checked={selected.includes(entry.version)} on:change={(event)=>selectVersion(entry.version,event.currentTarget.checked)}/><span class="sr-only">Выбор версии</span></label><div><strong>{entry.action==='delete_version'?'Удаление версии':entry.action==='discard'?'Удаление черновика':entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code>{#if entry.available===false}<span class="muted small">Версия удалена · восстановление недоступно</span>{/if}</div><div class="button-group"><button class="secondary" disabled={busy||!state.can_edit||entry.available===false||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button><button class="secondary" disabled={busy||dirty||!state.can_edit||entry.available===false||entry.version===state.active||entry.version===state.draft?.id} on:click={()=>deleteVersion(entry.version)}>Удалить версию</button></div></div>{/each}{#if !history.length}<p class="empty">История изменений пока пуста.</p>{/if}</div>{/if}</section>
+   {/if}
+  </div>
+ </div>
+-- 
+2.34.1
+

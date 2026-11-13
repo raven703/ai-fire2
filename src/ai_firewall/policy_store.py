@@ -66,18 +66,28 @@ class PolicyStore:
             return identifier,json.loads(row[0])
 
     def delete_version(self,identifier,actor,expected):
-        """Delete archived content, never its audit trail or a live pointer."""
+        return self.delete_versions([identifier],actor,expected)
+
+    def delete_versions(self,identifiers,actor,expected):
+        """Validate the entire selection before deleting anything atomically."""
+        if (not isinstance(identifiers,list) or not 1<=len(identifiers)<=100
+                or any(not isinstance(i,str) for i in identifiers)
+                or len(set(identifiers))!=len(identifiers)):
+            raise ValueError('invalid_version_selection')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             active=db.execute("SELECT id FROM state WHERE name='active'").fetchone()[0]
             if active!=expected: raise ValueError('policy_revision_conflict')
-            if db.execute('SELECT 1 FROM state WHERE id=?',(identifier,)).fetchone():
-                raise ValueError('protected_policy_version')
-            row=db.execute('SELECT body FROM versions WHERE id=?',(identifier,)).fetchone()
-            if not row: raise ValueError('unknown_version')
-            digest=hashlib.sha256(row[0].encode()).hexdigest()
-            db.execute('DELETE FROM versions WHERE id=?',(identifier,))
-            db.execute('INSERT INTO audit VALUES(?,?,?,?,?)',(int(time.time()),actor,'delete_version',identifier,digest))
+            selected=[]
+            for identifier in identifiers:
+                if db.execute('SELECT 1 FROM state WHERE id=?',(identifier,)).fetchone():
+                    raise ValueError('protected_policy_version')
+                row=db.execute('SELECT body FROM versions WHERE id=?',(identifier,)).fetchone()
+                if not row: raise ValueError('unknown_version')
+                selected.append((identifier,hashlib.sha256(row[0].encode()).hexdigest()))
+            for identifier,digest in selected:
+                db.execute('DELETE FROM versions WHERE id=?',(identifier,))
+                db.execute('INSERT INTO audit VALUES(?,?,?,?,?)',(int(time.time()),actor,'delete_version',identifier,digest))
 
     def draft(self,document,actor):
         validate(document)

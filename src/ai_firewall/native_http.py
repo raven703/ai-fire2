@@ -31,7 +31,7 @@ async def policy_manager(data:dict,user=Depends(get_verified_user)):
         raise HTTPException(403,'dlp_role_required')
     if user.role!='admin' and data.get('action')!='view':
         raise HTTPException(403,'dlp_admin_required')
-    if set(data)-{'action','policy','id','expected'}:
+    if set(data)-{'action','policy','id','ids','expected'}:
         raise HTTPException(400,'invalid_policy_request')
     try:
         async with httpx.AsyncClient(timeout=10,trust_env=False) as client:
