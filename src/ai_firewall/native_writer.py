@@ -50,9 +50,12 @@ async def inspected_flush(session, inspector, user, chat, current_revision):
     if not actual:
         return
     fields = {'rows': json.dumps(actual, sort_keys=True, separators=(',', ':'))}
-    result = await inspector.inspect(fields, user, chat, 'chat-write', current_revision, receipt=True)
-    if result['payload']['fields'] != fields or result['action'] != 'ALLOW':
-        raise HTTPException(403, 'native_writer_not_canonical')
+    if all(row['delete'] for row in actual):
+        result = await inspector.deletion(fields,user,chat,current_revision)
+    else:
+        result = await inspector.inspect(fields, user, chat, 'chat-write', current_revision, receipt=True)
+        if result['payload']['fields'] != fields or result['action'] != 'ALLOW':
+            raise HTTPException(403, 'native_writer_not_canonical')
     with authorized_write(inspector.receipts, result['admission'], result['payload'], current_revision):
         await session.flush()
 
@@ -67,11 +70,8 @@ def permit_snapshot(row, deleting=False):
     # Exact deletion authorization binds the old row without re-submitting its
     # content to NLP/Vault. Deleting cannot publish or introduce plaintext.
     from ai_firewall.protocol import canonical
-    # Hex digests can contain long digit runs passing phone/card checks. This is
-    # integrity metadata, not content: use an equally lossless letters-only
-    # encoding so mandatory DLP cannot mistake a deletion hash for PII.
+    # Integrity metadata goes only to the dedicated deletion permit contract.
     digest = hashlib.sha256(canonical(snapshot(row))).hexdigest()
-    digest = digest.translate(str.maketrans('0123456789abcdef', 'abcdefghijklmnop'))
     return {'id': row.id, 'row_sha256': digest}
 
 
@@ -96,6 +96,11 @@ def guard_flush(session, flush_context, instances):
     if permit is None or permit['consumed']:
         raise HTTPException(403, 'native_writer_permit_required')
     payload = permit['payload']
+    if payload.get('operation')=='chat-delete':
+        from ai_firewall.delete_contract import validate_delete
+        validate_delete(payload)
+        if any(row not in session.deleted for row in rows):
+            raise HTTPException(403,'delete_permit_cannot_write')
     actual = sorted(({'table': row.__table__.name,
                       'delete': row in session.deleted, 'columns': permit_snapshot(row, row in session.deleted)} for row in rows),
                     key=lambda row: (row['table'], str(row['columns'].get('id'))))

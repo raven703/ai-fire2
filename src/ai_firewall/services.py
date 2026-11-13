@@ -172,6 +172,16 @@ def gateway_app():
     detector = SyntheticDetector()
     admission = Admission(key('ADMISSION_KEY').encode(), 'synthetic-v2')
 
+    @app.post('/native/delete-permit')
+    async def delete_permit(request: Request):
+        auth(request,'NATIVE_GATEWAY_KEY')
+        from ai_firewall.delete_contract import validate_delete
+        try:
+            data=validate_delete(await request.json())
+        except HTTPException: raise
+        except Exception: raise HTTPException(400,'invalid_delete_manifest') from None
+        return {'payload':data,'admission':admission.issue(canonical(data),data['user'],'chat-delete')}
+
     @app.post('/native/inspect')
     async def native_inspect(request: Request):
         auth(request, 'NATIVE_GATEWAY_KEY')

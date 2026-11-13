@@ -60,6 +60,20 @@ class NativeInspector:
                 'dlp_trace correlation=%s stage=%s status=%s duration_ms=%s source=gateway',
                 correlation,operation,status,round((time.monotonic()-started)*1000))
 
+    async def deletion(self,fields,user,chat,current_revision):
+        from ai_firewall.delete_contract import validate_delete
+        payload=validate_delete(dict(fields=fields,user=user,chat=chat,operation='chat-delete',revision=current_revision))
+        try:
+            async with httpx.AsyncClient(timeout=10,trust_env=False,transport=self.transport) as client:
+                response=await client.post(self.url+'/native/delete-permit',json=payload,
+                    headers={'Authorization':'Bearer '+self.service_key})
+            response.raise_for_status()
+            result=response.json()
+            if result['payload']!=payload or not self.receipts.verify(result['admission'],canonical(payload),user,'chat-delete'):
+                raise ValueError()
+            return result
+        except Exception: raise HTTPException(503,'native_delete_permit_unavailable') from None
+
 
 def revision(value):
     return hashlib.sha256(canonical(value)).hexdigest()
