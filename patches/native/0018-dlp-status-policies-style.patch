@@ -1,0 +1,115 @@
+From 04eacb7736ffd93686b30de38ff9ba894df25865 Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 13:28:14 +0300
+Subject: [PATCH] Align DLP Status presentation with DLP Policies
+
+---
+ .../(app)/admin/dlp-status/+page.svelte       | 91 +++++++++++++------
+ 1 file changed, 65 insertions(+), 26 deletions(-)
+
+diff --git a/src/routes/(app)/admin/dlp-status/+page.svelte b/src/routes/(app)/admin/dlp-status/+page.svelte
+index 6efa31763..b32eb8f1c 100644
+--- a/src/routes/(app)/admin/dlp-status/+page.svelte
++++ b/src/routes/(app)/admin/dlp-status/+page.svelte
+@@ -10,32 +10,71 @@
+  async function save(){try{await request('/api/v1/dlp/status/settings',{method:'POST',body:JSON.stringify(state.settings)});await load();}catch(e){error=String(e);}}
+  async function original(){if(!confirm('Оригинал может содержать конфиденциальные данные и опасное активное содержимое. Выдаётся только как скачивание. Не открывайте в неизолированном приложении. Авторизованный получатель может сохранить или скопировать файл. Продолжить?'))return;
+   try{const r=await fetch('/api/v1/dlp/status/'+selected.event_id+'/evidence',{method:'POST',headers:headers(),cache:'no-store'});if(!r.ok)throw Error('Просмотр недоступен ('+r.status+')');const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='protected-evidence.'+selected.extension;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);await open(selected.event_id);}catch(e){error=String(e);}}
++ const filterLabels:Record<string,string>={user_id:'Пользователь',action:'Решение',category:'Категория',source:'Источник',reason_code:'Причина',policy_revision:'Ревизия политики',since:'С даты',until:'По дату'};
++ const statusClass=(action:string)=>(<Record<string,string>>{BLOCK:'block',REVIEW:'review',MASK:'mask',ALLOW:'allow',TECHNICAL_FAILURE:'technical'}[action]??'allow');
+  onMount(load);
+ </script>
+ 
+-<div class="overflow-y-auto w-full p-6 space-y-5" data-testid="dlp-status">
+- <h1 class="text-2xl font-semibold">DLP Status</h1>
+- <p>Журнал решений без исходного текста. Технический отказ — не REVIEW по содержимому.</p>
+- {#if error}<p role="alert" class="text-red-600">{error}</p>{/if}
+- {#if state}
+- <div class="flex flex-wrap gap-4">{#each Object.entries(state.counts) as [action,count]}<div class="rounded-xl border p-4"><strong>{action}</strong><p class="text-2xl">{count}</p></div>{/each}</div>
+- <details class="border rounded-xl p-4"><summary>Динамика по дням и категории</summary><div class="flex gap-8"><div>{#each Object.entries(state.timeline).sort() as [day,count]}<p>{day}: {count}</p>{/each}</div><div>{#each Object.entries(state.categories) as [category,count]}<p>{category}: {count}</p>{/each}</div></div></details>
+- <form class="flex flex-wrap gap-3" on:submit|preventDefault={()=>{page=0;load();}}>
+- {#each ['user_id','action','category','source','reason_code','policy_revision'] as key}<label class="text-sm">{key}<input aria-label={key} class="block border rounded-lg p-2 bg-transparent" bind:value={filters[key]}/></label>{/each}
+- {#each ['since','until'] as key}<label>{key}<input aria-label={key} type="datetime-local" class="block border rounded-lg p-2 bg-transparent" bind:value={filters[key]}/></label>{/each}
+- <select aria-label="Порядок времени" class="border rounded-lg bg-transparent" bind:value={filters.sort}><option value="desc">Новые сначала</option><option value="asc">Старые сначала</option></select>
+- <button class="border rounded-lg p-2" disabled={busy}>Применить фильтры</button>
+- </form>
+- <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr>{#each ['Время','Пользователь','Источник','Файл','Категории','Решение','Причина','Политика','Evidence'] as label}<th class="p-2 text-left">{label}</th>{/each}</tr></thead><tbody>
+- {#each state.events as event}<tr class="border-t hover:bg-gray-100 dark:hover:bg-gray-850"><td class="p-2"><button class="underline" on:click={()=>open(event.event_id)}>{new Date(event.timestamp*1000).toLocaleString()}</button></td><td>{event.user_id}</td><td>{event.source}</td><td>{event.file_reference??'CHAT'}</td><td>{event.categories.join(', ')}</td><td>{event.action}</td><td>{event.reason_code}</td><td>{event.policy_version??'—'}<br/>{event.policy_revision}</td><td>{event.evidence.status}</td></tr>{/each}
+- </tbody></table></div>
+- <div class="flex gap-4"><button disabled={page===0} on:click={()=>{page--;load();}}>Назад</button><span>{page+1} · всего {state.total}</span><button disabled={(page+1)*25>=state.total} on:click={()=>{page++;load();}}>Далее</button></div>
+- {#if selected}<section class="border rounded-xl p-4 space-y-3" data-testid="dlp-event-detail"><div class="flex justify-between"><h2 class="text-xl">Событие {selected.event_id}</h2><button on:click={()=>selected=null}>Закрыть</button></div><strong>{selected.action} · {selected.reason_code}</strong><p>Категории: {selected.categories.join(', ')||'не предоставлены'}</p><p>Политика: {selected.policy_version??'—'} / {selected.policy_revision??'—'}</p><p>Mock: {selected.mock_result} · Extraction: {selected.extraction_status} · {selected.processing_ms} мс</p>
+- <h3>Правила и детекторы</h3>{#each selected.findings as finding}<p>{finding.category} · {finding.rule_id} · {finding.detector} · confidence: {finding.confidence??'не предоставлен'} · {finding.block}</p>{/each}
+- <details><summary>Метаданные файла, OCR и блоки</summary><pre class="whitespace-pre-wrap break-all text-xs">{JSON.stringify(selected,null,2)}</pre></details>
+- <p>Защищённый оригинал: {selected.evidence.status}</p>
+- {#if state.can_view_evidence && selected.evidence.status==='STORED'}<button class="border rounded-lg p-2" on:click={original}>Просмотреть оригинал</button><p class="text-sm">Контролируемая выдача как скачивание; в браузере активное содержимое не открывается.</p>{/if}
+- <h3>Аудит доступа</h3>{#each audit as entry}<p>{new Date(entry.timestamp*1000).toLocaleString()} · {entry.actor} · {entry.operation} · {entry.result}</p>{/each}</section>{/if}
+- {#if state.can_edit}<details class="border rounded-xl p-4"><summary>Настройки Evidence Vault</summary><p class="my-3">По умолчанию retention выключен. Включение — явное административное действие. Изменение TTL применяется к новым объектам.</p><div class="space-y-3">{#each Object.keys(labels) as key}<label class="block">{labels[key]} {#if typeof state.settings[key]==='boolean'}<input type="checkbox" bind:checked={state.settings[key]}/>{:else}<input type="number" class="border rounded-lg p-2 bg-transparent" bind:value={state.settings[key]}/>{/if}</label>{/each}<button class="border rounded-lg p-2" on:click={save}>Сохранить настройки хранения</button></div></details>{/if}
+- {/if}
+-</div>
+\ No newline at end of file
++<div class="dlp-page" data-testid="dlp-status">
++ <div class="dlp-container">
++  <header class="page-header"><div><span class="eyebrow">БЕЗОПАСНОСТЬ · AI FIREWALL</span><h1>DLP Status</h1><p class="subtitle">Журнал решений без исходного текста. Технический отказ — не REVIEW по содержимому.</p></div><span class="badge safe">Журнал DLP-проверок</span></header>
++  {#if error}<div role="alert" class="message error">{error}</div>{/if}
++  {#if !state && busy}<div class="panel empty" role="status">Загружаем журнал решений…</div>{/if}
++  {#if state}
++   <section class="overview" aria-label="Решения DLP">{#each Object.entries(state.counts) as [action,count]}<div class="panel"><span class="badge {statusClass(action)}">{action}</span><strong class="count">{count}</strong><span class="muted small">События журнала</span></div>{/each}</section>
++   <details class="panel"><summary>Динамика по дням и категории</summary><div class="statistics"><div><h3>По дням</h3>{#each Object.entries(state.timeline).sort() as [day,count]}<p class="stat-row"><span>{day}</span><strong>{count}</strong></p>{:else}<p class="muted small">Нет данных</p>{/each}</div><div><h3>Категории</h3>{#each Object.entries(state.categories) as [category,count]}<p class="stat-row"><span>{category}</span><strong>{count}</strong></p>{:else}<p class="muted small">Нет данных</p>{/each}</div></div></details>
++   <section class="panel" aria-label="Фильтры событий"><div class="section-heading"><div><h2>Фильтры событий</h2><p class="muted small">Уточните решение, источник и период проверки.</p></div></div>
++    <form on:submit|preventDefault={()=>{page=0;load();}}><div class="filter-grid">
++     {#each ['user_id','action','category','source','reason_code','policy_revision'] as key}<label class="control"><span>{filterLabels[key]}</span><input aria-label={key} bind:value={filters[key]}/></label>{/each}
++     {#each ['since','until'] as key}<label class="control"><span>{filterLabels[key]}</span><input aria-label={key} type="datetime-local" bind:value={filters[key]}/></label>{/each}
++     <label class="control"><span>Порядок времени</span><select aria-label="Порядок времени" bind:value={filters.sort}><option value="desc">Новые сначала</option><option value="asc">Старые сначала</option></select></label>
++    </div><div class="filter-actions"><button class="primary" disabled={busy}>Применить фильтры</button>{#if busy}<span class="muted small" role="status">Обновляем журнал…</span>{/if}</div></form>
++   </section>
++   <section class="panel events" aria-label="Журнал событий"><div class="section-heading"><div><h2>Журнал событий</h2><p class="muted small">Всего: {state.total}. Откройте время события, чтобы посмотреть подробности.</p></div></div>
++    <div class="table-scroll" role="region" aria-label="Таблица событий"><table><thead><tr>{#each ['Время','Пользователь','Источник','Файл','Категории','Решение','Причина','Политика','Evidence'] as label}<th scope="col">{label}</th>{/each}</tr></thead><tbody>
++     {#each state.events as event}<tr><td><button class="event-link" on:click={()=>open(event.event_id)}>{new Date(event.timestamp*1000).toLocaleString()}</button></td><td class="identifier">{event.user_id}</td><td>{event.source}</td><td class="identifier">{event.file_reference??'CHAT'}</td><td>{event.categories.join(', ')}</td><td><span class="badge {statusClass(event.action)}">{event.action}</span></td><td class="identifier">{event.reason_code}</td><td class="identifier">{event.policy_version??'—'}<br/><span class="muted small">{event.policy_revision}</span></td><td><span class="muted small">{event.evidence.status}</span></td></tr>{:else}<tr><td colspan="9" class="empty">События по выбранным фильтрам не найдены.</td></tr>{/each}
++    </tbody></table></div>
++    <nav class="pagination" aria-label="Страницы журнала"><button class="secondary" disabled={page===0} on:click={()=>{page--;load();}}>Назад</button><span class="muted small">Страница {page+1} · всего {state.total}</span><button class="secondary" disabled={(page+1)*25>=state.total} on:click={()=>{page++;load();}}>Далее</button></nav>
++   </section>
++   {#if selected}<section class="panel event-detail" data-testid="dlp-event-detail" aria-label="Карточка события"><div class="section-heading"><div><h2>Событие</h2><code class="identifier muted small">{selected.event_id}</code></div><button class="secondary" on:click={()=>selected=null}>Закрыть</button></div><div class="detail-summary"><span class="badge {statusClass(selected.action)}">{selected.action}</span><strong class="identifier">{selected.reason_code}</strong></div>
++    <div class="metadata"><p><span class="muted small">Категории</span>{selected.categories.join(', ')||'не предоставлены'}</p><p><span class="muted small">Политика</span>{selected.policy_version??'—'} / {selected.policy_revision??'—'}</p><p><span class="muted small">Обработка</span>Mock: {selected.mock_result} · Extraction: {selected.extraction_status} · {selected.processing_ms} мс</p></div>
++    <div class="detail-section"><h3>Правила и детекторы</h3>{#each selected.findings as finding}<p class="finding">{finding.category} · {finding.rule_id} · {finding.detector} · confidence: {finding.confidence??'не предоставлен'} · {finding.block}</p>{:else}<p class="muted small">Находки не предоставлены.</p>{/each}</div>
++    <details class="detail-section"><summary>Метаданные файла, OCR и блоки</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>
++    <div class="detail-section"><h3>Защищённый оригинал</h3><p class="muted small">{selected.evidence.status}</p>
++     {#if state.can_view_evidence && selected.evidence.status==='STORED'}<button class="secondary evidence-button" on:click={original}>Просмотреть оригинал</button><p class="muted small">Контролируемая выдача как скачивание; в браузере активное содержимое не открывается.</p>{/if}</div>
++    <div class="detail-section"><h3>Аудит доступа</h3>{#each audit as entry}<p class="finding">{new Date(entry.timestamp*1000).toLocaleString()} · {entry.actor} · {entry.operation} · {entry.result}</p>{:else}<p class="muted small">Записей доступа пока нет.</p>{/each}</div>
++   </section>{/if}
++   {#if state.can_edit}<details class="panel"><summary>Настройки Evidence Vault</summary><p class="hint">По умолчанию retention выключен. Включение — явное административное действие. Изменение TTL применяется к новым объектам.</p><div class="settings-grid">{#each Object.keys(labels) as key}{#if typeof state.settings[key]==='boolean'}<label class="setting-toggle"><span>{labels[key]}</span><input type="checkbox" bind:checked={state.settings[key]}/></label>{:else}<label class="control"><span>{labels[key]}</span><input type="number" bind:value={state.settings[key]}/></label>{/if}{/each}</div><button class="primary" on:click={save}>Сохранить настройки хранения</button></details>{/if}
++  {/if}
++ </div>
++</div>
++
++<style>
++p{line-height:1.6}.panel{border:1px solid var(--dlp-border,#e2e8f0);border-radius:16px;padding:24px;background:var(--dlp-panel,#fff);margin-bottom:20px}.block{background:#feecec;color:#a52636}.review{background:#fff3d5;color:#885b07}.allow{background:#eef2f7;color:#475569}summary{cursor:pointer;font-size:15px;font-weight:600}button{font-size:13px;font-weight:600;padding:10px 15px;border-radius:9px;transition:background .15s}.message{padding:16px 20px;border:1px solid var(--dlp-border,#e2e8f0);border-radius:12px;margin-bottom:20px;font-size:14px}.error{background:#fff1f2;color:#9f1239;border-color:#fecdd3}.empty{text-align:center;padding:32px;color:var(--dlp-muted,#64748b)}
++
++.dlp-page{width:100%;height:100%;overflow-y:auto;background:var(--dlp-bg,#f8fafc);color:var(--dlp-text,#172033)}
++.dlp-container{max-width:1160px;margin:auto;padding:36px 28px 64px}
++.eyebrow{font-size:11px;font-weight:700;letter-spacing:.13em;color:#64748b}
++h1{font-size:30px;font-weight:750;letter-spacing:-.035em;margin:8px 0}
++h2{font-size:18px;font-weight:650;margin-bottom:8px}
++.subtitle,.muted{color:var(--dlp-muted,#64748b)}
++.small{font-size:12px}
++.badge{display:inline-flex;padding:5px 10px;border-radius:7px;font-size:11px;font-weight:650;white-space:nowrap}
++.safe,.mask{background:#e4f5ef;color:#16654d}
++input[type=checkbox]{width:17px;height:17px;accent-color:#059669;flex-shrink:0}
++.control{display:flex;flex-direction:column;gap:6px}
++.control>span{font-size:11px;color:var(--dlp-muted,#64748b)}
++select,input:not([type=checkbox]){background:var(--dlp-panel,#fff);color:inherit;border:1px solid var(--dlp-input,#cbd5e1);border-radius:8px;padding:10px 12px;font-size:13px;max-width:100%}
++select{width:100%}
++input:focus,select:focus,button:focus-visible,summary:focus-visible{outline:2px solid #10b981;outline-offset:3px}
++button.primary{background:#047857;color:white}
++button.primary:hover:not(:disabled){background:#065f46}
++button.secondary{border:1px solid var(--dlp-input,#cbd5e1);background:var(--dlp-panel,#fff)}
++button.secondary:hover:not(:disabled){background:var(--dlp-bg,#f8fafc)}
++button:disabled{opacity:.45;cursor:not-allowed}
++:global(.dark) .dlp-page{--dlp-bg:#11151d;--dlp-panel:#1b212c;--dlp-text:#e5eaf3;--dlp-muted:#a2aec0;--dlp-border:#303b4b;--dlp-input:#465268}
++.page-header,.section-heading{display:flex;justify-content:space-between;align-items:center;gap:24px}.page-header{margin-bottom:28px}.section-heading{margin-bottom:22px}.overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:20px}.overview .panel{margin:0;display:flex;flex-direction:column;align-items:flex-start;gap:10px}.count{font-size:28px;font-weight:750}.technical{background:#ede9fe;color:#5b21b6}.statistics,.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:22px}.stat-row{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--dlp-border,#e2e8f0);padding:10px 0;overflow-wrap:anywhere}h3{font-size:14px;font-weight:650;margin-bottom:10px}.filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.control input{width:100%;min-width:0}.filter-actions{display:flex;align-items:center;gap:16px;margin-top:22px}.table-scroll{overflow-x:auto;border:1px solid var(--dlp-border,#e2e8f0);border-radius:12px}.table-scroll:focus-visible{outline:2px solid #10b981;outline-offset:3px}table{width:100%;font-size:12px;text-align:left;border-collapse:collapse}th{font-size:11px;color:var(--dlp-muted,#64748b);font-weight:650;background:var(--dlp-bg,#f8fafc);white-space:nowrap}th,td{padding:14px 12px;vertical-align:top;border-bottom:1px solid var(--dlp-border,#e2e8f0)}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--dlp-bg,#f8fafc)}.identifier{overflow-wrap:anywhere;min-width:100px}.event-link{padding:0;text-align:left;color:inherit;text-decoration:underline;text-underline-offset:3px;font-size:12px;min-width:110px}.pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:20px}.detail-summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;font-size:14px}.metadata{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:22px;font-size:13px;overflow-wrap:anywhere}.metadata span{display:block;margin-bottom:6px}.detail-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--dlp-border,#e2e8f0)}.finding{font-size:12px;overflow-wrap:anywhere;padding:10px 0}.event-detail code{display:block;max-width:100%}pre{margin-top:16px;padding:16px;background:var(--dlp-bg,#f8fafc);border-radius:12px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}.evidence-button{margin:12px 0}.hint{font-size:12px;color:var(--dlp-muted,#64748b);margin:18px 0}.setting-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:13px;padding:12px 0;border-bottom:1px solid var(--dlp-border,#e2e8f0)}.settings-grid{margin-bottom:24px}.settings-grid .control>span{font-size:12px}
++:global(.dark) .badge.block{background:#48232c;color:#fda4af}:global(.dark) .badge.review{background:#42351e;color:#fcd47e}:global(.dark) .badge.mask,:global(.dark) .badge.safe{background:#173f35;color:#7ee2bd}:global(.dark) .badge.allow{background:#303b4b;color:#d4deec}:global(.dark) .badge.technical{background:#362754;color:#d1baff}:global(.dark) .message.error{background:#48232c;color:#fda4af;border-color:#743347}
++@media(max-width:900px){.page-header,.section-heading{align-items:flex-start;flex-direction:column}.filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
++@media(max-width:540px){.dlp-container{padding:24px 14px}.panel{padding:18px}h1{font-size:26px}.filter-grid,.statistics,.settings-grid,.metadata{grid-template-columns:1fr}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-actions{align-items:stretch;flex-direction:column}.pagination{flex-wrap:wrap}.pagination span{order:3;width:100%;text-align:center}.page-header{gap:14px}.badge{white-space:normal;overflow-wrap:anywhere}}
++</style>
+-- 
+2.34.1
+
