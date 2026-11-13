@@ -49,7 +49,7 @@ for i in "${!services[@]}"; do
       docker export "${containers[$i]}" -o "$backup/${services[$i]}-rootfs.tar"
       # Imported roots need the original service command (Compose restores env/mounts).
       case "${services[$i]}" in
-        gateway) command='["python","-m","ai_firewall.services"]' ;;
+        gateway) command='["uvicorn","ai_firewall.services:app","--host","0.0.0.0","--port","8000","--no-access-log"]' ;;
         pii) command='["uvicorn","ai_firewall.pii_service:app","--host","0.0.0.0","--port","8000","--no-access-log","--log-level","critical"]' ;;
         webui) command='["uvicorn","ai_firewall.native_runtime:app","--host","0.0.0.0","--port","8080","--no-access-log"]' ;;
       esac

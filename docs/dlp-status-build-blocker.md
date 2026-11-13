@@ -1,5 +1,9 @@
 # Deployment blocker — 2026-11-12
 
+RESOLVED by GitHub Actions frontend handoff and local artifact deployment.
+See docs/github-frontend-deployment.md for executed Chromium acceptance. The
+historical account below records the prior incomplete checkpoint, not current state.
+
 Implementation is NOT accepted or deployed as a complete feature.
 
 WSL exposes 9948 MiB RAM. All previously running auxiliary PoC, acceptance and

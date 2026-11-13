@@ -1,5 +1,24 @@
 name: ai-fire2-vault-v2
 services:
+  transit-renewer:
+    image: ai-fire2-vault-v2-vault-v2:latest
+    command: [python, /opt/renew-transit-tokens.py]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./scripts/renew-transit-tokens.py:/opt/renew-transit-tokens.py:ro
+      - ./artifacts/vault-v2-secrets/vault-encrypt:/run/secrets/vault-encrypt:ro
+      - ./artifacts/vault-v2-secrets/vault-decrypt:/run/secrets/vault-decrypt:ro
+    networks: [keys]
+    healthcheck:
+      test: [CMD, python, -c, "import time;from pathlib import Path;assert time.time()-int(Path('/tmp/renewed').read_text())<7200"]
+      interval: 60s
+      timeout: 3s
+      retries: 2
   gateway-v2:
     build:
       context: .
