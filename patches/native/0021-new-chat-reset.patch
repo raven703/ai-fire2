@@ -1,0 +1,54 @@
+From d7e9ec0366c992681ff987a0a4a3ee1175cb3bdc Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 15:57:56 +0300
+Subject: [PATCH] fix(native): clear attachments and scope on new chat
+
+---
+ src/lib/components/chat/Chat.svelte         | 5 +++++
+ src/lib/components/chat/MessageInput.svelte | 5 +++--
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/components/chat/Chat.svelte b/src/lib/components/chat/Chat.svelte
+index 83a995756..851691aaa 100644
+--- a/src/lib/components/chat/Chat.svelte
++++ b/src/lib/components/chat/Chat.svelte
+@@ -2921,6 +2921,11 @@
+ 		// A new native conversation must not retain the previous server scope.
+ 		chat = null;
+ 		nativeRevision = null;
++		if ($config?.features?.native_text_only) {
++			prompt = '';
++			files = [];
++			messageInput?.setText('');
++		}
+ 
+ 		history = {
+ 			messages: {},
+diff --git a/src/lib/components/chat/MessageInput.svelte b/src/lib/components/chat/MessageInput.svelte
+index 07edfe201..0456bf93f 100644
+--- a/src/lib/components/chat/MessageInput.svelte
++++ b/src/lib/components/chat/MessageInput.svelte
+@@ -1269,10 +1269,9 @@
+ 		}
+ 	};
+ 
+- let nativeScope='';
+  const nativeUpload=async (inputFiles:File[])=>{
+   if(files.length+inputFiles.length>4){toast.error('Не более 4 вложений');return;}
+-  if(!nativeScope)nativeScope=chatId||uuidv4();
++  const nativeScope=chatId||files.find(f=>f.native)?.scope||uuidv4();
+   for(const file of inputFiles){
+    const item:any={id:uuidv4(),type:'native-file',name:'Защищённое вложение',status:'processing',native:true,scope:nativeScope,action:'OCR',categories:[]};
+    files=[...files,item];
+@@ -1283,6 +1282,8 @@
+     const result=await response.json();
+     item.id=result.id??item.id;item.action=result.action;item.categories=result.categories??[];item.status=result.status==='ready'?'ready':'denied';item.blocks=result.blocks??[];item.reason=[result.message,result.reason_code,result.event_id].filter(Boolean).join(' · ');
+    }catch(e){item.status='denied';item.action='REVIEW';item.reason='Ошибка или лимит обработки';}
++   // A reset/removal while the request was in flight must not revive its batch.
++   if(!files.includes(item))return;
+    files=[...files];
+   }
+  };
+-- 
+2.34.1
+

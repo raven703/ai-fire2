@@ -5,7 +5,7 @@
   "local_path": "forks/open-webui",
   "development_branch": "firewall/native-core",
   "poc_commit": "eab205a",
-  "fork_commit": "ff107fc34fe5cf1808bee6d57538995ef92fe04f",
+  "fork_commit": "d7e9ec0366c992681ff987a0a4a3ee1175cb3bdc",
   "patch_series": [
     "patches/native/0001-native-core-staged.patch",
     "patches/native/0002-bounded-rollup-build.patch",
@@ -26,7 +26,8 @@
     "patches/native/0017-dlp-status-evidence.patch",
     "patches/native/0018-dlp-status-policies-style.patch",
     "patches/native/0019-dlp-event-modal.patch",
-    "patches/native/0020-review-approval.patch"
+    "patches/native/0020-review-approval.patch",
+    "patches/native/0021-new-chat-reset.patch"
   ],
   "stage": "policy-manager-deployed-synthetic-browser-verified"
 }
