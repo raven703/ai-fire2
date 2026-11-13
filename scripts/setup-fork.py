@@ -18,7 +18,13 @@ else:
     subprocess.run(['git', '-C', str(destination), 'switch', '-c', manifest['development_branch'],
                     manifest['upstream_commit']], check=True)
     for patch in manifest.get('patch_series', []):
-        subprocess.run(['git', '-C', str(destination), 'am', str(root / patch)], check=True)
+        path=root/patch
+        if path.read_bytes().startswith(b'From '):
+            subprocess.run(['git', '-C', str(destination), 'am', str(path)], check=True)
+        else:
+            subprocess.run(['git', '-C', str(destination), 'apply','--check',str(path)],check=True)
+            subprocess.run(['git', '-C', str(destination), 'apply','--index',str(path)],check=True)
+            subprocess.run(['git', '-C', str(destination), 'commit','-m','Apply '+path.name],check=True)
     for remote in ['source-local', 'upstream']:
         subprocess.run(['git', '-C', str(destination), 'config', f'remote.{remote}.pushurl', 'DISABLED'], check=True)
     subprocess.run(['python3', str(root / 'scripts/check-fork.py')], check=True)

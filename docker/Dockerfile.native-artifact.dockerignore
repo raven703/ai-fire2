@@ -1,0 +1,16 @@
+.git
+.env
+.venv
+.build
+vendor
+artifacts/*
+!artifacts/frontend-stage
+!artifacts/frontend-stage/**
+**/__pycache__
+**/.pytest_cache
+**/*.db
+forks/open-webui/.git
+forks/open-webui/node_modules
+forks/open-webui/backend/data
+forks/open-webui/.svelte-kit
+forks/open-webui/build
