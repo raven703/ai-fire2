@@ -1,0 +1,66 @@
+From b7fae9b93373fe43bd3185ab81a2794362c5a6b7 Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 13:56:44 +0300
+Subject: [PATCH] Show DLP event in accessible native modal with readable
+ reasons
+
+---
+ src/routes/(app)/admin/dlp-status/+page.svelte | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/src/routes/(app)/admin/dlp-status/+page.svelte b/src/routes/(app)/admin/dlp-status/+page.svelte
+index b32eb8f1c..adb70cfc7 100644
+--- a/src/routes/(app)/admin/dlp-status/+page.svelte
++++ b/src/routes/(app)/admin/dlp-status/+page.svelte
+@@ -1,12 +1,16 @@
+ <script lang="ts">
+  import {onMount} from 'svelte';
++ import Modal from '$lib/components/common/Modal.svelte';
++ let showEvent=false;
++ const reasons:Record<string,string>={POLICY_REVIEW:'Требуется согласование сотрудником ИБ',POLICY_BLOCK:'Передача запрещена политикой безопасности',POLICY_MASK:'Данные скрыты согласно политике безопасности',POLICY_ALLOW:'Передача разрешена политикой безопасности',OCR_LOW_CONFIDENCE:'Недостаточная достоверность распознавания документа',EXTRACTION_INCOMPLETE:'Не удалось полностью проверить документ',DEPENDENCY_UNAVAILABLE:'Сервис обязательной проверки недоступен',PROCESSING_INTERRUPTED:'Безопасная обработка прервана',OCR_EMPTY:'Не удалось распознать текст документа'};
++ const explanation=(event:any)=>reasons[event.reason_code]??(event.action==='TECHNICAL_FAILURE'?'Техническая невозможность безопасной обработки':event.action==='REVIEW'?'Требуется согласование сотрудником ИБ':event.action==='BLOCK'?'Передача запрещена политикой безопасности':'Результат обязательной DLP-проверки');
+  let state:any=null, selected:any=null, audit:any[]=[], error='', page=0, busy=false;
+  let filters:any={action:'',category:'',source:'',reason_code:'',policy_revision:'',user_id:'',since:'',until:'',sort:'desc'};
+  const labels:any={enabled:'Хранить отклонённые оригиналы',store_block:'Хранить BLOCK',store_review:'Хранить REVIEW',store_technical:'Хранить технические отказы',retention_days:'Срок хранения (дней)',max_bytes:'Максимальный размер (байт)',quota_bytes:'Квота (байт)'};
+  function headers(){return {Authorization:`Bearer ${localStorage.token}`,'Content-Type':'application/json'};}
+  async function request(url:string,options:any={}){const r=await fetch(url,{...options,headers:headers(),cache:'no-store'});if(!r.ok)throw Error(r.status===403?'Недостаточно прав.':`Операция недоступна (${r.status})`);return r.json();}
+  async function load(){busy=true;error='';try{const q=new URLSearchParams({page:String(page)});for(const [k,v] of Object.entries(filters)){if(v)q.set(k,['since','until'].includes(k)?String(new Date(String(v)).getTime()/1000):String(v));}state=await request('/api/v1/dlp/status?'+q);}catch(e){error=String(e);}finally{busy=false;}}
+- async function open(id:string){try{const r=await request('/api/v1/dlp/status/'+id);selected=r.event;audit=r.audit;}catch(e){error=String(e);}}
++ async function open(id:string){try{const r=await request('/api/v1/dlp/status/'+id);selected=r.event;audit=r.audit;showEvent=true;}catch(e){error=String(e);}}
+  async function save(){try{await request('/api/v1/dlp/status/settings',{method:'POST',body:JSON.stringify(state.settings)});await load();}catch(e){error=String(e);}}
+  async function original(){if(!confirm('Оригинал может содержать конфиденциальные данные и опасное активное содержимое. Выдаётся только как скачивание. Не открывайте в неизолированном приложении. Авторизованный получатель может сохранить или скопировать файл. Продолжить?'))return;
+   try{const r=await fetch('/api/v1/dlp/status/'+selected.event_id+'/evidence',{method:'POST',headers:headers(),cache:'no-store'});if(!r.ok)throw Error('Просмотр недоступен ('+r.status+')');const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='protected-evidence.'+selected.extension;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);await open(selected.event_id);}catch(e){error=String(e);}}
+@@ -32,24 +36,26 @@
+    </section>
+    <section class="panel events" aria-label="Журнал событий"><div class="section-heading"><div><h2>Журнал событий</h2><p class="muted small">Всего: {state.total}. Откройте время события, чтобы посмотреть подробности.</p></div></div>
+     <div class="table-scroll" role="region" aria-label="Таблица событий"><table><thead><tr>{#each ['Время','Пользователь','Источник','Файл','Категории','Решение','Причина','Политика','Evidence'] as label}<th scope="col">{label}</th>{/each}</tr></thead><tbody>
+-     {#each state.events as event}<tr><td><button class="event-link" on:click={()=>open(event.event_id)}>{new Date(event.timestamp*1000).toLocaleString()}</button></td><td class="identifier">{event.user_id}</td><td>{event.source}</td><td class="identifier">{event.file_reference??'CHAT'}</td><td>{event.categories.join(', ')}</td><td><span class="badge {statusClass(event.action)}">{event.action}</span></td><td class="identifier">{event.reason_code}</td><td class="identifier">{event.policy_version??'—'}<br/><span class="muted small">{event.policy_revision}</span></td><td><span class="muted small">{event.evidence.status}</span></td></tr>{:else}<tr><td colspan="9" class="empty">События по выбранным фильтрам не найдены.</td></tr>{/each}
++     {#each state.events as event}<tr on:click={()=>open(event.event_id)}><td><button class="event-link" on:click|stopPropagation={()=>open(event.event_id)}>{new Date(event.timestamp*1000).toLocaleString()}</button></td><td class="identifier">{event.user_id}</td><td>{event.source}</td><td class="identifier">{event.file_reference??'CHAT'}</td><td>{event.categories.join(', ')}</td><td><span class="badge {statusClass(event.action)}">{event.action}</span></td><td>{explanation(event)}</td><td class="identifier">{event.policy_version??'—'}<br/><span class="muted small">{event.policy_revision}</span></td><td><span class="muted small">{event.evidence.status}</span></td></tr>{:else}<tr><td colspan="9" class="empty">События по выбранным фильтрам не найдены.</td></tr>{/each}
+     </tbody></table></div>
+     <nav class="pagination" aria-label="Страницы журнала"><button class="secondary" disabled={page===0} on:click={()=>{page--;load();}}>Назад</button><span class="muted small">Страница {page+1} · всего {state.total}</span><button class="secondary" disabled={(page+1)*25>=state.total} on:click={()=>{page++;load();}}>Далее</button></nav>
+    </section>
+-   {#if selected}<section class="panel event-detail" data-testid="dlp-event-detail" aria-label="Карточка события"><div class="section-heading"><div><h2>Событие</h2><code class="identifier muted small">{selected.event_id}</code></div><button class="secondary" on:click={()=>selected=null}>Закрыть</button></div><div class="detail-summary"><span class="badge {statusClass(selected.action)}">{selected.action}</span><strong class="identifier">{selected.reason_code}</strong></div>
+-    <div class="metadata"><p><span class="muted small">Категории</span>{selected.categories.join(', ')||'не предоставлены'}</p><p><span class="muted small">Политика</span>{selected.policy_version??'—'} / {selected.policy_revision??'—'}</p><p><span class="muted small">Обработка</span>Mock: {selected.mock_result} · Extraction: {selected.extraction_status} · {selected.processing_ms} мс</p></div>
++   {#if selected}<Modal bind:show={showEvent} size="lg" ariaLabel="Событие DLP" className="rounded-2xl"><section class="dlp-page panel event-detail" data-testid="dlp-event-detail" aria-label="Карточка события"><div class="section-heading"><div><h2>Событие</h2><code class="identifier muted small">{selected.event_id}</code></div><button class="secondary" aria-label="Закрыть событие" on:click={()=>showEvent=false}>×</button></div><div class="detail-summary"><span class="badge {statusClass(selected.action)}">{selected.action}</span><strong>{explanation(selected)}</strong></div>
++    <div class="metadata"><p><span class="muted small">Дата и время</span>{new Date(selected.timestamp*1000).toLocaleString()}</p><p><span class="muted small">Пользователь</span>{selected.user_id}</p><p><span class="muted small">Источник / файл</span>{selected.source} · {selected.file_reference??'—'}</p><p><span class="muted small">Передача модели</span>{selected.mock_result==='NOT_SENT'?'NOT_SENT':selected.mock_result==='COMPLETED'?'SENT':'Не подтверждена'}</p><p><span class="muted small">Категории</span>{selected.categories.join(', ')||'не предоставлены'}</p><p><span class="muted small">Политика</span>{selected.policy_version??'—'} / {selected.policy_revision??'—'}</p><p><span class="muted small">Обработка</span>Mock: {selected.mock_result} · Extraction: {selected.extraction_status} · {selected.processing_ms} мс</p></div>
+     <div class="detail-section"><h3>Правила и детекторы</h3>{#each selected.findings as finding}<p class="finding">{finding.category} · {finding.rule_id} · {finding.detector} · confidence: {finding.confidence??'не предоставлен'} · {finding.block}</p>{:else}<p class="muted small">Находки не предоставлены.</p>{/each}</div>
+     <details class="detail-section"><summary>Метаданные файла, OCR и блоки</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>
+     <div class="detail-section"><h3>Защищённый оригинал</h3><p class="muted small">{selected.evidence.status}</p>
+      {#if state.can_view_evidence && selected.evidence.status==='STORED'}<button class="secondary evidence-button" on:click={original}>Просмотреть оригинал</button><p class="muted small">Контролируемая выдача как скачивание; в браузере активное содержимое не открывается.</p>{/if}</div>
+     <div class="detail-section"><h3>Аудит доступа</h3>{#each audit as entry}<p class="finding">{new Date(entry.timestamp*1000).toLocaleString()} · {entry.actor} · {entry.operation} · {entry.result}</p>{:else}<p class="muted small">Записей доступа пока нет.</p>{/each}</div>
+-   </section>{/if}
++   </section></Modal>{/if}
+    {#if state.can_edit}<details class="panel"><summary>Настройки Evidence Vault</summary><p class="hint">По умолчанию retention выключен. Включение — явное административное действие. Изменение TTL применяется к новым объектам.</p><div class="settings-grid">{#each Object.keys(labels) as key}{#if typeof state.settings[key]==='boolean'}<label class="setting-toggle"><span>{labels[key]}</span><input type="checkbox" bind:checked={state.settings[key]}/></label>{:else}<label class="control"><span>{labels[key]}</span><input type="number" bind:value={state.settings[key]}/></label>{/if}{/each}</div><button class="primary" on:click={save}>Сохранить настройки хранения</button></details>{/if}
+   {/if}
+  </div>
+ </div>
+ 
+ <style>
++.event-detail{max-height:85dvh;overflow-y:auto;margin:0;height:auto}.events tbody tr{cursor:pointer}
++
+ p{line-height:1.6}.panel{border:1px solid var(--dlp-border,#e2e8f0);border-radius:16px;padding:24px;background:var(--dlp-panel,#fff);margin-bottom:20px}.block{background:#feecec;color:#a52636}.review{background:#fff3d5;color:#885b07}.allow{background:#eef2f7;color:#475569}summary{cursor:pointer;font-size:15px;font-weight:600}button{font-size:13px;font-weight:600;padding:10px 15px;border-radius:9px;transition:background .15s}.message{padding:16px 20px;border:1px solid var(--dlp-border,#e2e8f0);border-radius:12px;margin-bottom:20px;font-size:14px}.error{background:#fff1f2;color:#9f1239;border-color:#fecdd3}.empty{text-align:center;padding:32px;color:var(--dlp-muted,#64748b)}
+ 
+ .dlp-page{width:100%;height:100%;overflow-y:auto;background:var(--dlp-bg,#f8fafc);color:var(--dlp-text,#172033)}
+-- 
+2.34.1
+
