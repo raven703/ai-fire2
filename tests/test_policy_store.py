@@ -25,6 +25,24 @@ def test_backreference_regex_denied():
         validate({'regex':[{'pattern':r'(a)\1','entity':'PERSON'}]})
 
 
+def test_discard_is_scoped_and_keeps_history(tmp_path):
+    import yaml
+    baseline=tmp_path/'baseline.yaml'
+    baseline.write_text(yaml.safe_dump(dict(version='test',rules=[dict(entity='PERSON',action='MASK',threshold=.5)],dictionaries={},regex=[])))
+    store=PolicyStore(str(tmp_path/'db'),baseline)
+    initial=store.view()
+    draft=store.draft(initial['policy'],'admin')
+    with pytest.raises(ValueError): store.discard('wrong','admin',initial['active'])
+    with pytest.raises(ValueError): store.discard(draft,'admin','stale')
+    store.discard(draft,'admin',initial['active'])
+    current=store.view()
+    assert current['draft'] is None
+    assert current['active']==initial['active']
+    assert current['history'][0]['action']=='discard'
+    assert store.snapshot(draft)[1]==initial['policy']
+    with pytest.raises(ValueError): store.discard(draft,'admin',initial['active'])
+
+
 def test_snapshot_and_baseline_edit(tmp_path):
     from pathlib import Path
     baseline=Path('/app/config/pii-policy-v1.yaml')

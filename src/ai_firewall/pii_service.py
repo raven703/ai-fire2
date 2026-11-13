@@ -46,6 +46,9 @@ def manage_policy(request:Request,data:dict):
     try:
         if data['action']=='view': return store.view()
         if data['action']=='draft': return {'id':store.draft(data['policy'],data['actor'])}
+        if data['action']=='discard':
+            store.discard(data['id'],data['actor'],data['expected'])
+            return {'discarded':True}
         if data['action']=='publish': return {'id':store.publish(data['id'],data['actor'],data['expected'])}
         raise ValueError('invalid_action')
     except (ValueError,KeyError): raise HTTPException(400,'invalid_policy_operation') from None

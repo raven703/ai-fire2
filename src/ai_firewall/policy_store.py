@@ -76,3 +76,15 @@ class PolicyStore:
             document=json.loads(row[0])
             # Existing baseline regex is trusted; edited drafts validated earlier.
             return self.save(db,document,actor,'publish')
+
+    def discard(self,identifier,actor,expected):
+        """Remove only the working pointer; keep immutable versions and audit."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            active=db.execute("SELECT id FROM state WHERE name='active'").fetchone()[0]
+            draft=db.execute("SELECT id FROM state WHERE name='draft'").fetchone()
+            if active!=expected or not draft or draft[0]!=identifier:
+                raise ValueError('policy_revision_conflict')
+            body=db.execute('SELECT body FROM versions WHERE id=?',(identifier,)).fetchone()[0]
+            db.execute("DELETE FROM state WHERE name='draft'")
+            db.execute('INSERT INTO audit VALUES(?,?,?,?,?)',(int(time.time()),actor,'discard',identifier,hashlib.sha256(body.encode()).hexdigest()))

@@ -68,6 +68,10 @@ class StagedNative:
         if native_enabled and method == 'GET' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}/view', path):
             # No saved auxiliary view state is enabled in protected text mode.
             return await JSONResponse({'state': None}, headers={'Cache-Control': 'no-store'})(scope, receive, send)
+        if native_enabled and method == 'GET' and re.fullmatch(r'/api/v1/users/[a-f0-9-]{36}/profile/image', path):
+            # Native mode does not expose uploaded/remote profile content.
+            from starlette.responses import FileResponse
+            return await FileResponse('/app/backend/open_webui/static/user.png')(scope, receive, send)
         # Unsupported discovery returns no capabilities; it does not invoke
         # upstream tools/terminal/task writers or expose their content.
         empty_discovery = {'/api/v1/tools/', '/api/v1/terminals/', '/api/v1/configs/banners',
@@ -76,7 +80,7 @@ class StagedNative:
                            '/api/v1/skills/'}
         if native_enabled and method == 'GET' and path in empty_discovery:
             return await JSONResponse([], headers={'Cache-Control': 'no-store'})(scope, receive, send)
-        native_get = (path in {'/api/models/native', '/api/v1/chats/native/list'}
+        native_get = (path in {'/api/models/native', '/api/v1/chats/native/list', '/api/v1/users/', '/api/v1/groups/'}
                       or re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}(?:/native)?', path))
         native_delete = method == 'DELETE' and re.fullmatch(r'/api/v1/chats/[a-f0-9-]{36}', path)
         native_post = (path in {'/api/chat/completions/native','/api/v1/dlp/policies'} or

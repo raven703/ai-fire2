@@ -1,0 +1,58 @@
+From 992961b8f15648482d262354cac571120e30ec60 Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 10:06:29 +0300
+Subject: [PATCH] Add draft discard and custom DLP rule removal controls
+
+---
+ src/routes/(app)/admin/dlp/+page.svelte | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src/routes/(app)/admin/dlp/+page.svelte b/src/routes/(app)/admin/dlp/+page.svelte
+index 7aab0e107..d22369f8e 100644
+--- a/src/routes/(app)/admin/dlp/+page.svelte
++++ b/src/routes/(app)/admin/dlp/+page.svelte
+@@ -18,10 +18,12 @@
+   busy=true;error='';notice='';
+   try{
+    if(kind==='draft')await request({action:kind,policy:JSON.parse(document)});
+-   else await request({action:'publish',id:id??state.draft?.id,expected:state.active});
+-   await refresh();notice=kind==='draft'?'Черновик сохранён. Чтобы применить изменения, опубликуйте его.':'Политика опубликована и применяется к новым проверкам.';
++   else await request({action:kind,id:id??state.draft?.id,expected:state.active});
++   await refresh();notice=kind==='discard'?'Черновик удалён. Действующая политика не изменилась.':kind==='draft'?'Черновик сохранён. Чтобы применить изменения, опубликуйте его.':'Политика опубликована и применяется к новым проверкам.';
+   }catch(e){error=e instanceof SyntaxError?'Некорректный JSON. Исправьте документ перед сохранением.':e instanceof Error?e.message:String(e);}finally{busy=false;}
+  }
++ function removeRule(entity:string){if(!window.confirm(`Удалить правило ${label(entity)} вместе с его словарём и шаблонами из рабочей копии? Изменение вступит в силу только после сохранения и публикации.`))return;editor.rules=editor.rules.filter((rule:any)=>rule.entity!==entity);delete editor.dictionaries[entity];editor.regex=editor.regex.filter((rule:any)=>rule.entity!==entity);sync();}
++ function discard(){if(window.confirm('Удалить сохранённый черновик и сбросить несохранённые изменения? Действующая политика и история сохранятся.'))action('discard');}
+  function restore(id:string){if(window.confirm('Опубликовать эту версию вместо действующей политики?'))action('publish',id);}
+  function applyJSON(){try{const parsed=JSON.parse(document);if(!Array.isArray(parsed.rules)||!parsed.dictionaries||!Array.isArray(parsed.regex))throw new Error();editor=parsed;sync();error='';}catch{error='Не удалось применить JSON: проверьте структуру rules, dictionaries и regex.';}}
+  onMount(()=>{refresh().catch(e=>error=e.message).finally(()=>loading=false);});
+@@ -43,22 +45,22 @@
+     <section class="panel categories">
+      <div class="section-heading"><div><h2>Категории данных</h2><p class="muted">Выберите действие для каждого типа обнаруженных данных.</p></div><label class="search"><span class="sr-only">Поиск категории</span><input type="search" placeholder="Найти категорию…" bind:value={search}/></label></div>
+      <div class="legend">{#each actions as choice}<div><span class="badge {choice.id.toLowerCase()}">{choice.label}</span><p>{choice.description}</p></div>{/each}</div>
+-     <p class="hint">Порог уверенности — от 0 до 1. Чем ниже значение, тем больше находок учитывается; чем выше, тем меньше сомнительных совпадений. Выключенная категория не ограничивает данные, но не отключает общую проверку.</p>
++     <p class="hint">Порог уверенности — от 0 до 1. Чем ниже значение, тем больше находок учитывается; чем выше, тем меньше сомнительных совпадений. Выключенная категория не ограничивает данные, но не отключает общую проверку. Встроенные категории можно отключать; пользовательские правила — удалять вместе с их словарями и шаблонами.</p>
+      <div class="rule-list">{#each visible as rule}
+       <div class="rule-row" class:inactive={rule.enabled===false}>
+        <label class="category-name"><input type="checkbox" aria-label={`Enabled ${rule.entity}`} checked={rule.enabled!==false} on:change={(event)=>{rule.enabled=event.currentTarget.checked;sync();}}/><span><strong>{label(rule.entity)}</strong><code>{rule.entity}</code></span></label>
+        <label class="control"><span>При обнаружении</span><select aria-label={`Action ${rule.entity}`} bind:value={rule.action} on:change={sync}>{#each actions as choice}<option value={choice.id}>{choice.label} · {choice.id}</option>{/each}</select></label>
+        <label class="control threshold"><span>Порог уверенности</span><input aria-label={`Threshold ${rule.entity}`} type="number" min="0" max="1" step="0.05" bind:value={rule.threshold} on:input={sync}/></label>
+-      </div>
++      {#if !names[rule.entity]}<button class="secondary" disabled={editor.rules.length<=1} on:click={()=>removeRule(rule.entity)}>Удалить правило</button>{/if}</div>
+      {/each}</div>
+      {#if !visible.length}<p class="empty">Категории не найдены. Попробуйте другое название.</p>{/if}
+     </section>
+     <section class="panel"><h2>Корпоративные словари</h2><p class="muted">Слова и фразы, которые нужно находить в тексте. Действие задаётся в соответствующей категории выше.</p><div class="dictionary-grid">{#each Object.keys(editor.dictionaries) as category}<label class="dictionary"><strong>{label(category)}</strong><span class="muted small">Одна запись на строку · {editor.dictionaries[category].length} записей</span><textarea aria-label={`Словарь ${label(category)}`} rows="5" value={editor.dictionaries[category].join('\n')} on:input={(event)=>{editor.dictionaries[category]=event.currentTarget.value.split('\n').filter(Boolean);sync();}}/><span class="muted small">Не оставляйте словарь пустым: политика требует хотя бы одну запись.</span></label>{/each}</div></section>
+     <section class="panel"><details><summary>Дополнительные настройки <span class="muted small">Регулярные выражения и JSON</span></summary><p class="hint">Для специалистов. Ошибка в шаблоне может изменить обнаружение данных. Перед публикацией проверьте настройки.</p>{#each editor.regex as rule,i}<label class="dictionary"><strong>{label(rule.entity)}</strong><input aria-label={`Regex ${rule.entity} ${i}`} class="mono" bind:value={rule.pattern} on:input={sync}/></label>{/each}<details class="json-editor"><summary>Редактор JSON</summary><p class="muted small">После ручного редактирования примените JSON к форме. Сервер дополнительно проверит документ при сохранении черновика.</p><textarea aria-label="Policy JSON" class="mono" rows="16" bind:value={document}/><button class="secondary" on:click={applyJSON}>Применить JSON к форме</button></details></details></section>
+-    <div class="action-bar"><div><strong>{busy?'Выполняем действие…':dirty?'Изменения ещё не сохранены':state.draft?'Черновик готов к публикации':'Нет новых изменений'}</strong><p class="muted small">Публикация меняет действующую политику для новых проверок.</p></div><div class="button-group"><button class="secondary" disabled={busy} on:click={()=>action('draft')}>Сохранить черновик</button><button class="primary" disabled={busy||!state.draft||dirty} on:click={()=>action('publish')}>Опубликовать черновик</button></div></div>
++    <div class="action-bar"><div><strong>{busy?'Выполняем действие…':dirty?'Изменения ещё не сохранены':state.draft?'Черновик готов к публикации':'Нет новых изменений'}</strong><p class="muted small">Публикация меняет действующую политику для новых проверок.</p></div><div class="button-group">{#if state.draft}<button class="secondary" disabled={busy} on:click={discard}>Удалить черновик</button>{/if}<button class="secondary" disabled={busy} on:click={()=>action('draft')}>Сохранить черновик</button><button class="primary" disabled={busy||!state.draft||dirty} on:click={()=>action('publish')}>Опубликовать черновик</button></div></div>
+    </fieldset>
+    {#if !state.can_edit}<p class="message">Режим аудитора: настройки доступны только для чтения. Сохранение и публикация запрещены.</p>{/if}
+-   <section class="panel history"><h2>История изменений</h2><p class="muted">Восстановление публикует выбранную версию вместо текущей. События журнала могут ссылаться на одну и ту же версию.</p>{#each state.history as entry}<div class="history-row border-b"><div><strong>{entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code></div><button class="secondary" disabled={busy||!state.can_edit||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button></div>{/each}{#if !state.history.length}<p class="empty">История изменений пока пуста.</p>{/if}</section>
++   <section class="panel history"><h2>История изменений</h2><p class="muted">Восстановление публикует выбранную версию вместо текущей. События журнала могут ссылаться на одну и ту же версию.</p>{#each state.history as entry}<div class="history-row border-b"><div><strong>{entry.action==='discard'?'Удаление черновика':entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code></div><button class="secondary" disabled={busy||!state.can_edit||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button></div>{/each}{#if !state.history.length}<p class="empty">История изменений пока пуста.</p>{/if}</section>
+   {/if}
+  </div>
+ </div>
+-- 
+2.34.1
+
