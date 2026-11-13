@@ -40,7 +40,8 @@ services:
       dockerfile: docker/Dockerfile.vault-v2
     environment:
       MASK_ATTESTATION_KEY_FILE: /run/secrets/mask-attestation
-      DLP_REAL_DATA_ENABLED: 'false'
+      # Explicit operator request: persist general MASK admission across restarts.
+      DLP_REAL_DATA_ENABLED: 'true'
       PG_PASSWORD_FILE: /run/secrets/pg-password
       BAO_TOKEN_FILE: /run/secrets/bao-encrypt
       BAO_DECRYPT_TOKEN_FILE: /run/secrets/bao-decrypt
