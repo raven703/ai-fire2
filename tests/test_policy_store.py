@@ -53,3 +53,27 @@ def test_snapshot_and_baseline_edit(tmp_path):
     store.publish(draft,'admin',initial)
     assert store.snapshot(initial)[1]['rules'][0]['action']=='MASK'
     assert store.snapshot()[1]['rules'][0]['action']=='BLOCK'
+
+
+def test_delete_archived_version_preserves_audit_and_protects_pointers(tmp_path):
+    import yaml
+    baseline=tmp_path/'baseline.yaml'
+    baseline.write_text(yaml.safe_dump(dict(version='test',rules=[dict(entity='PERSON',action='MASK',threshold=.5)],dictionaries={},regex=[])))
+    store=PolicyStore(str(tmp_path/'db'),baseline)
+    initial=store.view()
+    draft=store.draft(initial['policy'],'admin')
+    with pytest.raises(ValueError):store.delete_version(initial['active'],'admin',initial['active'])
+    with pytest.raises(ValueError):store.delete_version(draft,'admin',initial['active'])
+    store.discard(draft,'admin',initial['active'])
+    previous=store.view()['history']
+    with pytest.raises(ValueError):store.delete_version(draft,'admin','stale')
+    store.delete_version(draft,'admin',initial['active'])
+    current=store.view()
+    assert current['active']==initial['active'] and current['draft'] is None
+    assert current['history'][0]['action']=='delete_version'
+    assert len(current['history'])==len(previous)+1
+    assert all(not e['available'] for e in current['history'] if e['version']==draft)
+    assert [(e['action'],e['digest']) for e in current['history'][1:]]==[(e['action'],e['digest']) for e in previous]
+    with pytest.raises(ValueError):store.snapshot(draft)
+    with pytest.raises(ValueError):store.publish(draft,'admin',initial['active'])
+    with pytest.raises(ValueError):store.delete_version(draft,'admin',initial['active'])

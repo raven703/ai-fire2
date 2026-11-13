@@ -5,7 +5,7 @@
   "local_path": "forks/open-webui",
   "development_branch": "firewall/native-core",
   "poc_commit": "eab205a",
-  "fork_commit": "992961b8f15648482d262354cac571120e30ec60",
+  "fork_commit": "16d3f361209266a9958029ea5242f57d645b6206",
   "patch_series": [
     "patches/native/0001-native-core-staged.patch",
     "patches/native/0002-bounded-rollup-build.patch",
@@ -19,7 +19,8 @@
     "patches/native/0010-dlp-policy-manager.patch",
     "patches/native/0011-native-changelog-dismissal.patch",
     "patches/native/0012-readable-dlp-settings.patch",
-    "patches/native/0013-dlp-discard-rules.patch"
+    "patches/native/0013-dlp-discard-rules.patch",
+    "patches/native/0014-dlp-version-delete-audit.patch"
   ],
   "stage": "policy-manager-deployed-synthetic-browser-verified"
 }

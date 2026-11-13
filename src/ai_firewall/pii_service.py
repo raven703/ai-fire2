@@ -46,6 +46,9 @@ def manage_policy(request:Request,data:dict):
     try:
         if data['action']=='view': return store.view()
         if data['action']=='draft': return {'id':store.draft(data['policy'],data['actor'])}
+        if data['action']=='delete_version':
+            store.delete_version(data['id'],data['actor'],data['expected'])
+            return {'deleted':True}
         if data['action']=='discard':
             store.discard(data['id'],data['actor'],data['expected'])
             return {'discarded':True}

@@ -1,0 +1,49 @@
+From 16d3f361209266a9958029ea5242f57d645b6206 Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 10:24:13 +0300
+Subject: [PATCH] Delete archived policy versions while retaining collapsible
+ audit history
+
+---
+ src/routes/(app)/admin/dlp/+page.svelte | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/routes/(app)/admin/dlp/+page.svelte b/src/routes/(app)/admin/dlp/+page.svelte
+index d22369f8e..c08d2f1bd 100644
+--- a/src/routes/(app)/admin/dlp/+page.svelte
++++ b/src/routes/(app)/admin/dlp/+page.svelte
+@@ -1,6 +1,7 @@
+ <script lang="ts">
+  import { onMount } from 'svelte';
+  let state:any=null, editor:any=null;
++ let historyOpen=false;
+  let document='', saved='', error='', notice='', busy=false, loading=true, search='';
+  const names:Record<string,string>={PERSON:'Имена и фамилии',ORGANIZATION:'Организации',LOCATION:'Географические названия',EMAIL_ADDRESS:'Электронная почта',PHONE_NUMBER:'Номера телефонов',CREDIT_CARD:'Банковские карты',IP_ADDRESS:'IP-адреса',RU_INN:'ИНН',RU_SNILS:'СНИЛС',RU_PASSPORT:'Паспорт РФ',RU_BIC:'БИК банка',RU_BANK_ACCOUNT:'Банковские счета',CORPORATE_SECRET:'Коммерческая тайна',APPROVAL_REQUIRED:'Данные для согласования',RU_OGRN:'ОГРН',RU_OGRNIP:'ОГРНИП',DATE_OF_BIRTH:'Дата рождения',POSTAL_ADDRESS:'Почтовые адреса',API_KEY:'API-ключи',JWT:'JWT-токены',BEARER_TOKEN:'Токены доступа',PRIVATE_KEY:'Приватные ключи',PASSWORD:'Пароли',CONNECTION_STRING:'Строки подключения'};
+  const actions=[{id:'MASK',label:'Скрыть данные',description:'Заменить найденные значения защищёнными токенами.'},{id:'BLOCK',label:'Заблокировать',description:'Отклонить операцию при обнаружении данных.'},{id:'REVIEW',label:'Требовать согласования',description:'Остановить операцию с вердиктом REVIEW, а не пропускать автоматически.'},{id:'ALLOW',label:'Разрешить',description:'Не ограничивать эту категорию. Общая DLP-проверка остаётся обязательной.'}];
+@@ -19,11 +20,12 @@
+   try{
+    if(kind==='draft')await request({action:kind,policy:JSON.parse(document)});
+    else await request({action:kind,id:id??state.draft?.id,expected:state.active});
+-   await refresh();notice=kind==='discard'?'Черновик удалён. Действующая политика не изменилась.':kind==='draft'?'Черновик сохранён. Чтобы применить изменения, опубликуйте его.':'Политика опубликована и применяется к новым проверкам.';
++   await refresh();notice=kind==='delete_version'?'Старая версия удалена без возможности восстановления. Журнал аудита сохранён.':kind==='discard'?'Черновик удалён. Действующая политика не изменилась.':kind==='draft'?'Черновик сохранён. Чтобы применить изменения, опубликуйте его.':'Политика опубликована и применяется к новым проверкам.';
+   }catch(e){error=e instanceof SyntaxError?'Некорректный JSON. Исправьте документ перед сохранением.':e instanceof Error?e.message:String(e);}finally{busy=false;}
+  }
+  function removeRule(entity:string){if(!window.confirm(`Удалить правило ${label(entity)} вместе с его словарём и шаблонами из рабочей копии? Изменение вступит в силу только после сохранения и публикации.`))return;editor.rules=editor.rules.filter((rule:any)=>rule.entity!==entity);delete editor.dictionaries[entity];editor.regex=editor.regex.filter((rule:any)=>rule.entity!==entity);sync();}
+  function discard(){if(window.confirm('Удалить сохранённый черновик и сбросить несохранённые изменения? Действующая политика и история сохранятся.'))action('discard');}
++ function deleteVersion(id:string){if(dirty){error='Сначала сохраните изменения или удалите черновик, чтобы не потерять правки.';return;}if(window.confirm('Безвозвратно удалить эту старую версию настроек? Восстановить её будет нельзя. Все события аудита сохранятся.'))action('delete_version',id);}
+  function restore(id:string){if(window.confirm('Опубликовать эту версию вместо действующей политики?'))action('publish',id);}
+  function applyJSON(){try{const parsed=JSON.parse(document);if(!Array.isArray(parsed.rules)||!parsed.dictionaries||!Array.isArray(parsed.regex))throw new Error();editor=parsed;sync();error='';}catch{error='Не удалось применить JSON: проверьте структуру rules, dictionaries и regex.';}}
+  onMount(()=>{refresh().catch(e=>error=e.message).finally(()=>loading=false);});
+@@ -60,7 +62,8 @@
+     <div class="action-bar"><div><strong>{busy?'Выполняем действие…':dirty?'Изменения ещё не сохранены':state.draft?'Черновик готов к публикации':'Нет новых изменений'}</strong><p class="muted small">Публикация меняет действующую политику для новых проверок.</p></div><div class="button-group">{#if state.draft}<button class="secondary" disabled={busy} on:click={discard}>Удалить черновик</button>{/if}<button class="secondary" disabled={busy} on:click={()=>action('draft')}>Сохранить черновик</button><button class="primary" disabled={busy||!state.draft||dirty} on:click={()=>action('publish')}>Опубликовать черновик</button></div></div>
+    </fieldset>
+    {#if !state.can_edit}<p class="message">Режим аудитора: настройки доступны только для чтения. Сохранение и публикация запрещены.</p>{/if}
+-   <section class="panel history"><h2>История изменений</h2><p class="muted">Восстановление публикует выбранную версию вместо текущей. События журнала могут ссылаться на одну и ту же версию.</p>{#each state.history as entry}<div class="history-row border-b"><div><strong>{entry.action==='discard'?'Удаление черновика':entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code></div><button class="secondary" disabled={busy||!state.can_edit||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button></div>{/each}{#if !state.history.length}<p class="empty">История изменений пока пуста.</p>{/if}</section>
++   <section class="panel history"><div class="section-heading"><div><h2>История изменений</h2><p class="muted">Журнал аудита сохраняется даже после удаления старых версий настроек.</p></div><button class="secondary" aria-expanded={historyOpen} aria-controls="dlp-audit-log" on:click={()=>historyOpen=!historyOpen}>{historyOpen?'Скрыть журнал аудита':'Показать журнал аудита'}</button></div>
++   {#if historyOpen}<div id="dlp-audit-log"><p class="hint">Удаление версии необратимо. Действующую версию и текущий черновик удалить здесь нельзя. События могут ссылаться на одну версию; её удаление отключает восстановление во всех таких событиях. Показаны последние {state.history.length} событий (не более 100).</p>{#each state.history as entry}<div class="history-row border-b"><div><strong>{entry.action==='delete_version'?'Удаление версии':entry.action==='discard'?'Удаление черновика':entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code>{#if entry.available===false}<span class="muted small">Версия удалена · восстановление недоступно</span>{/if}</div><div class="button-group"><button class="secondary" disabled={busy||!state.can_edit||entry.available===false||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button><button class="secondary" disabled={busy||dirty||!state.can_edit||entry.available===false||entry.version===state.active||entry.version===state.draft?.id} on:click={()=>deleteVersion(entry.version)}>Удалить версию</button></div></div>{/each}{#if !state.history.length}<p class="empty">История изменений пока пуста.</p>{/if}</div>{/if}</section>
+   {/if}
+  </div>
+ </div>
+-- 
+2.34.1
+

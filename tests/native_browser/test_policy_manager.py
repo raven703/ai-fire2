@@ -80,6 +80,7 @@ def test_policy_publication_and_roles():
             page.locator('button[type=submit]').click()
             expect(page.locator('#chat-input')).to_be_visible(timeout=30000)
             page.goto('http://webui:8080/admin/dlp',wait_until='domcontentloaded')
+            page.get_by_role('button',name='Показать журнал аудита',exact=True).click()
             row=page.locator('div.border-b').filter(has_text=initial['active'])
             with page.expect_response(lambda r:'/api/v1/dlp/policies' in r.url and r.request.post_data_json.get('action')=='publish') as restored:
                 page.once('dialog', lambda dialog: dialog.accept())

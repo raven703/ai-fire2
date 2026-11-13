@@ -52,6 +52,9 @@ class PolicyStore:
             body=json.loads(db.execute('SELECT body FROM versions WHERE id=?',(active,)).fetchone()[0])
             draft=db.execute("SELECT v.id,v.body FROM state s JOIN versions v ON s.id=v.id WHERE s.name='draft'").fetchone()
             history=[dict(zip(('at','actor','action','version','digest'),r)) for r in db.execute('SELECT * FROM audit ORDER BY rowid DESC LIMIT 100')]
+            available={row[0] for row in db.execute('SELECT id FROM versions')}
+            for entry in history:
+                entry['available']=entry['version'] in available
             return {'active':active,'policy':body,'draft':{'id':draft[0],'policy':json.loads(draft[1])} if draft else None,'history':history}
 
     def snapshot(self,identifier=None):
@@ -61,6 +64,20 @@ class PolicyStore:
             row=db.execute('SELECT body FROM versions WHERE id=?',(identifier,)).fetchone()
             if not row: raise ValueError('unknown_policy_revision')
             return identifier,json.loads(row[0])
+
+    def delete_version(self,identifier,actor,expected):
+        """Delete archived content, never its audit trail or a live pointer."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            active=db.execute("SELECT id FROM state WHERE name='active'").fetchone()[0]
+            if active!=expected: raise ValueError('policy_revision_conflict')
+            if db.execute('SELECT 1 FROM state WHERE id=?',(identifier,)).fetchone():
+                raise ValueError('protected_policy_version')
+            row=db.execute('SELECT body FROM versions WHERE id=?',(identifier,)).fetchone()
+            if not row: raise ValueError('unknown_version')
+            digest=hashlib.sha256(row[0].encode()).hexdigest()
+            db.execute('DELETE FROM versions WHERE id=?',(identifier,))
+            db.execute('INSERT INTO audit VALUES(?,?,?,?,?)',(int(time.time()),actor,'delete_version',identifier,digest))
 
     def draft(self,document,actor):
         validate(document)
