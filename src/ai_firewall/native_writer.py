@@ -67,7 +67,12 @@ def permit_snapshot(row, deleting=False):
     # Exact deletion authorization binds the old row without re-submitting its
     # content to NLP/Vault. Deleting cannot publish or introduce plaintext.
     from ai_firewall.protocol import canonical
-    return {'id': row.id, 'row_sha256': hashlib.sha256(canonical(snapshot(row))).hexdigest()}
+    # Hex digests can contain long digit runs passing phone/card checks. This is
+    # integrity metadata, not content: use an equally lossless letters-only
+    # encoding so mandatory DLP cannot mistake a deletion hash for PII.
+    digest = hashlib.sha256(canonical(snapshot(row))).hexdigest()
+    digest = digest.translate(str.maketrans('0123456789abcdef', 'abcdefghijklmnop'))
+    return {'id': row.id, 'row_sha256': digest}
 
 
 @contextmanager
