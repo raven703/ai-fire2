@@ -2,6 +2,7 @@ name: ai-fire2-vault-v2
 services:
   transit-renewer:
     image: ai-fire2-vault-v2-vault-v2:latest
+    user: '1000:1000'
     command: [python, /opt/renew-transit-tokens.py]
     restart: unless-stopped
     read_only: true
