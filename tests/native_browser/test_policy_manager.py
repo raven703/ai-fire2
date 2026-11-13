@@ -33,16 +33,16 @@ def test_policy_publication_and_roles():
             if modal.is_visible():
                 modal.get_by_role('button',name="Okay, Let's Go!").click()
             page.goto('http://webui:8080/admin/dlp',wait_until='domcontentloaded')
-            expect(page.get_by_role('heading',name='DLP Policy Manager',exact=True)).to_be_visible()
+            expect(page.get_by_role('heading',name='Защита данных',exact=True)).to_be_visible()
             expect(page.get_by_label('Action PERSON',exact=True)).to_be_visible()
             modal=page.get_by_role('dialog',name="What's New in Open WebUI")
             if modal.is_visible():
                 modal.get_by_role('button',name="Okay, Let's Go!").click()
             page.get_by_label('Action APPROVAL_REQUIRED',exact=True).select_option('BLOCK')
-            page.get_by_role('button',name='Save draft',exact=True).click()
-            expect(page.get_by_role('button',name='Publish draft',exact=True)).to_be_enabled()
+            page.get_by_role('button',name='Сохранить черновик',exact=True).click()
+            expect(page.get_by_role('button',name='Опубликовать черновик',exact=True)).to_be_enabled()
             with page.expect_response(lambda r:'/api/v1/dlp/policies' in r.url and r.request.post_data_json.get('action')=='publish') as published:
-                page.get_by_role('button',name='Publish draft',exact=True).click()
+                page.get_by_role('button',name='Опубликовать черновик',exact=True).click()
             assert published.value.status==200
             print('UI published',flush=True)
             page.context.close()
@@ -82,7 +82,8 @@ def test_policy_publication_and_roles():
             page.goto('http://webui:8080/admin/dlp',wait_until='domcontentloaded')
             row=page.locator('div.border-b').filter(has_text=initial['active'])
             with page.expect_response(lambda r:'/api/v1/dlp/policies' in r.url and r.request.post_data_json.get('action')=='publish') as restored:
-                row.get_by_role('button',name='Restore this version',exact=True).click()
+                page.once('dialog', lambda dialog: dialog.accept())
+                row.get_by_role('button',name='Восстановить версию',exact=True).first.click()
             assert restored.value.status==200
             print('UI rollback',flush=True)
             page.context.close()
@@ -121,7 +122,7 @@ def test_policy_publication_and_roles():
                 if allowed:
                     expect(other.get_by_label('Action PERSON',exact=True)).to_be_disabled()
                 else:
-                    expect(other.get_by_role('heading',name='DLP Policy Manager',exact=True)).not_to_be_visible()
+                    expect(other.get_by_role('heading',name='Защита данных',exact=True)).not_to_be_visible()
                 context.close()
         finally:
             current=api.post('/api/v1/dlp/policies',headers=headers,json={'action':'view'}).json()

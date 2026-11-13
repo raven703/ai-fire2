@@ -1,0 +1,140 @@
+From c4d2400a61bff5b206bcf23e1c1ef05b5b59cedd Mon Sep 17 00:00:00 2001
+From: Raven703 <raven703@gmail.com>
+Date: Fri, 13 Nov 2026 09:47:13 +0300
+Subject: [PATCH] Redesign DLP settings with readable Russian controls and
+ publication guidance
+
+---
+ src/routes/(app)/admin/dlp/+page.svelte | 115 ++++++++++++++----------
+ 1 file changed, 66 insertions(+), 49 deletions(-)
+
+diff --git a/src/routes/(app)/admin/dlp/+page.svelte b/src/routes/(app)/admin/dlp/+page.svelte
+index f52ba5651..7aab0e107 100644
+--- a/src/routes/(app)/admin/dlp/+page.svelte
++++ b/src/routes/(app)/admin/dlp/+page.svelte
+@@ -1,55 +1,72 @@
+ <script lang="ts">
+  import { onMount } from 'svelte';
+- let state:any=null;
+- let document='';
+- let error='';
+- let busy=false;
+- let editor:any=null;
+- function sync(){document=JSON.stringify(editor,null,2);}
+- async function request(payload:any) {
++ let state:any=null, editor:any=null;
++ let document='', saved='', error='', notice='', busy=false, loading=true, search='';
++ const names:Record<string,string>={PERSON:'Имена и фамилии',ORGANIZATION:'Организации',LOCATION:'Географические названия',EMAIL_ADDRESS:'Электронная почта',PHONE_NUMBER:'Номера телефонов',CREDIT_CARD:'Банковские карты',IP_ADDRESS:'IP-адреса',RU_INN:'ИНН',RU_SNILS:'СНИЛС',RU_PASSPORT:'Паспорт РФ',RU_BIC:'БИК банка',RU_BANK_ACCOUNT:'Банковские счета',CORPORATE_SECRET:'Коммерческая тайна',APPROVAL_REQUIRED:'Данные для согласования',RU_OGRN:'ОГРН',RU_OGRNIP:'ОГРНИП',DATE_OF_BIRTH:'Дата рождения',POSTAL_ADDRESS:'Почтовые адреса',API_KEY:'API-ключи',JWT:'JWT-токены',BEARER_TOKEN:'Токены доступа',PRIVATE_KEY:'Приватные ключи',PASSWORD:'Пароли',CONNECTION_STRING:'Строки подключения'};
++ const actions=[{id:'MASK',label:'Скрыть данные',description:'Заменить найденные значения защищёнными токенами.'},{id:'BLOCK',label:'Заблокировать',description:'Отклонить операцию при обнаружении данных.'},{id:'REVIEW',label:'Требовать согласования',description:'Остановить операцию с вердиктом REVIEW, а не пропускать автоматически.'},{id:'ALLOW',label:'Разрешить',description:'Не ограничивать эту категорию. Общая DLP-проверка остаётся обязательной.'}];
++ const label=(entity:string)=>names[entity]??entity;
++ $: dirty=document!==saved;
++ $: visible=editor?.rules.filter((rule:any)=>`${label(rule.entity)} ${rule.entity}`.toLowerCase().includes(search.toLowerCase()))??[];
++ function sync(){document=JSON.stringify(editor,null,2);notice='';}
++ async function request(payload:any){
+   const response=await fetch('/api/v1/dlp/policies',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.token}`},body:JSON.stringify(payload)});
+-  if(!response.ok) throw new Error(`DLP operation denied (${response.status})`);
++  if(!response.ok) throw new Error(response.status===409?'Политика уже изменена другим администратором. Обновите страницу перед публикацией.':response.status===403?'Недостаточно прав для этого действия.':response.status===400||response.status===422?'Настройки не прошли проверку. Проверьте пороги, словари и регулярные выражения.':`Не удалось выполнить действие (код ${response.status}). Повторите попытку.`);
+   return response.json();
+  }
+- async function refresh(){state=await request({action:'view'});editor=structuredClone(state.draft?.policy??state.policy);sync();}
+- async function action(kind:string,id?:string){busy=true;error='';try{
+-  if(kind==='draft') await request({action:kind,policy:JSON.parse(document)});
+-  else await request({action:'publish',id:id??state.draft?.id,expected:state.active});
+-  await refresh();
+- }catch(e){error=String(e);}finally{busy=false;}}
+- onMount(()=>{refresh().catch(e=>error=String(e));});
++ async function refresh(){state=await request({action:'view'});editor=structuredClone(state.draft?.policy??state.policy);sync();saved=document;}
++ async function action(kind:string,id?:string){
++  busy=true;error='';notice='';
++  try{
++   if(kind==='draft')await request({action:kind,policy:JSON.parse(document)});
++   else await request({action:'publish',id:id??state.draft?.id,expected:state.active});
++   await refresh();notice=kind==='draft'?'Черновик сохранён. Чтобы применить изменения, опубликуйте его.':'Политика опубликована и применяется к новым проверкам.';
++  }catch(e){error=e instanceof SyntaxError?'Некорректный JSON. Исправьте документ перед сохранением.':e instanceof Error?e.message:String(e);}finally{busy=false;}
++ }
++ function restore(id:string){if(window.confirm('Опубликовать эту версию вместо действующей политики?'))action('publish',id);}
++ function applyJSON(){try{const parsed=JSON.parse(document);if(!Array.isArray(parsed.rules)||!parsed.dictionaries||!Array.isArray(parsed.regex))throw new Error();editor=parsed;sync();error='';}catch{error='Не удалось применить JSON: проверьте структуру rules, dictionaries и regex.';}}
++ onMount(()=>{refresh().catch(e=>error=e.message).finally(()=>loading=false);});
+ </script>
+-<div class="p-6 w-full overflow-y-auto">
+- <h1 class="text-xl font-semibold">DLP Policy Manager</h1>
+- <p>JSON: rules (entity/action/threshold), dictionaries, regex. ALLOW disables a category decision, not mandatory inspection.</p>
+- {#if error}<p role="alert" class="text-red-600">{error}</p>{/if}
+- {#if state}
+-  <p>Active revision: {state.active}</p>
+-  <fieldset disabled={busy||!state.can_edit}>
+-  <table class="w-full text-left"><thead><tr><th>Category</th><th>Action</th><th>Threshold</th></tr></thead><tbody>
+-  {#each editor.rules as rule}
+-   <tr><td><input type="checkbox" aria-label={`Enabled ${rule.entity}`} checked={rule.enabled!==false} on:change={(event)=>{rule.enabled=event.currentTarget.checked;sync();}} />{rule.entity}</td><td><select aria-label={`Action ${rule.entity}`} bind:value={rule.action} on:change={sync} class="dark:bg-gray-900">
+-   {#each ['ALLOW','MASK','BLOCK','REVIEW'] as choice}<option>{choice}</option>{/each}
+-   </select></td><td><input aria-label={`Threshold ${rule.entity}`} type="number" min="0" max="1" step="0.05" bind:value={rule.threshold} on:input={sync} class="w-20 dark:bg-gray-900" /></td></tr>
+-  {/each}</tbody></table>
+-  <h2>Corporate dictionaries (one entry per line)</h2>
+-  {#each Object.keys(editor.dictionaries) as category}
+-   <label>{category}<textarea class="w-full border dark:bg-gray-900" value={editor.dictionaries[category].join('\n')} on:input={(event)=>{editor.dictionaries[category]=event.currentTarget.value.split('\n').filter(Boolean);sync();}} /></label>
+-  {/each}
+-  <h2>Regex</h2>
+-  {#each editor.regex as rule}<div>{rule.entity}<input class="w-full border dark:bg-gray-900" bind:value={rule.pattern} on:input={sync}/></div>{/each}
+-  <details><summary>Advanced JSON</summary>
+-  <textarea aria-label="Policy JSON" class="w-full h-96 font-mono border rounded p-3 dark:bg-gray-900" bind:value={document}></textarea>
+-  </details>
+-  <button disabled={busy} on:click={()=>action('draft')}>Save draft</button>
+-  <button disabled={busy||!state.draft} on:click={()=>action('publish')}>Publish draft</button>
+-  </fieldset>
+-  {#if !state.can_edit}<p>Read-only auditor access. Publication and reveal are separate permissions.</p>{/if}
+-  <h2 class="text-lg mt-4">Audit / rollback</h2>
+-  {#each state.history as entry}
+-   <div class="border-b py-2">{entry.action} · {entry.version} · {new Date(entry.at*1000).toISOString()}
+-    <button disabled={busy||!state.can_edit} on:click={()=>action('publish',entry.version)}>Restore this version</button>
+-   </div>
+-  {/each}
+- {/if}
+-</div>
+\ No newline at end of file
++
++<div class="dlp-page">
++ <div class="dlp-container">
++  <header class="page-header"><div><span class="eyebrow">БЕЗОПАСНОСТЬ · AI FIREWALL</span><h1>Защита данных</h1><p class="subtitle">Настройте, какие данные скрывать, блокировать или отправлять на согласование.</p></div><span class="badge safe">Обязательная DLP-проверка</span></header>
++  {#if error}<div role="alert" class="message error">{error}{#if !state}<button class="secondary" on:click={()=>{loading=true;error='';refresh().catch(e=>error=e.message).finally(()=>loading=false);}}>Повторить загрузку</button>{/if}</div>{/if}
++  {#if notice}<div role="status" class="message success">{notice}</div>{/if}
++  {#if loading}<div class="panel empty" role="status">Загружаем настройки защиты…</div>{:else if state}
++   <section class="overview" aria-label="Состояние политики">
++    <div class="panel"><span class="muted small">Действующая версия</span><strong class="version" title={state.active}>{state.active}</strong><span class="badge safe">Применяется сейчас</span></div>
++    <div class="panel"><span class="muted small">Рабочая копия</span><strong>{dirty?'Есть несохранённые изменения':state.draft?'Черновик сохранён':'Совпадает с действующей'}</strong><span class="muted small">{state.draft?'Черновик не влияет на проверки до публикации.':'Изменения сначала сохраняются как черновик.'}</span></div>
++    <div class="panel"><span class="muted small">Ваш доступ</span><strong>{state.can_edit?'Администратор':'Аудитор · только чтение'}</strong><span class="muted small">{state.can_edit?'Настройка, публикация и восстановление версий.':'Просмотр настроек и истории без изменений.'}</span></div>
++   </section>
++   <section class="panel guide"><h2>Как применить изменения</h2><p><b>1.</b> Настройте категории ниже. <b>2.</b> Сохраните черновик. <b>3.</b> Опубликуйте его, чтобы включить новую политику.</p><p class="muted small">Настройки относятся к проверкам входящих и исходящих данных. Доступ к раскрытию скрытых значений регулируется отдельно.</p></section>
++   <fieldset disabled={busy||!state.can_edit}>
++    <section class="panel categories">
++     <div class="section-heading"><div><h2>Категории данных</h2><p class="muted">Выберите действие для каждого типа обнаруженных данных.</p></div><label class="search"><span class="sr-only">Поиск категории</span><input type="search" placeholder="Найти категорию…" bind:value={search}/></label></div>
++     <div class="legend">{#each actions as choice}<div><span class="badge {choice.id.toLowerCase()}">{choice.label}</span><p>{choice.description}</p></div>{/each}</div>
++     <p class="hint">Порог уверенности — от 0 до 1. Чем ниже значение, тем больше находок учитывается; чем выше, тем меньше сомнительных совпадений. Выключенная категория не ограничивает данные, но не отключает общую проверку.</p>
++     <div class="rule-list">{#each visible as rule}
++      <div class="rule-row" class:inactive={rule.enabled===false}>
++       <label class="category-name"><input type="checkbox" aria-label={`Enabled ${rule.entity}`} checked={rule.enabled!==false} on:change={(event)=>{rule.enabled=event.currentTarget.checked;sync();}}/><span><strong>{label(rule.entity)}</strong><code>{rule.entity}</code></span></label>
++       <label class="control"><span>При обнаружении</span><select aria-label={`Action ${rule.entity}`} bind:value={rule.action} on:change={sync}>{#each actions as choice}<option value={choice.id}>{choice.label} · {choice.id}</option>{/each}</select></label>
++       <label class="control threshold"><span>Порог уверенности</span><input aria-label={`Threshold ${rule.entity}`} type="number" min="0" max="1" step="0.05" bind:value={rule.threshold} on:input={sync}/></label>
++      </div>
++     {/each}</div>
++     {#if !visible.length}<p class="empty">Категории не найдены. Попробуйте другое название.</p>{/if}
++    </section>
++    <section class="panel"><h2>Корпоративные словари</h2><p class="muted">Слова и фразы, которые нужно находить в тексте. Действие задаётся в соответствующей категории выше.</p><div class="dictionary-grid">{#each Object.keys(editor.dictionaries) as category}<label class="dictionary"><strong>{label(category)}</strong><span class="muted small">Одна запись на строку · {editor.dictionaries[category].length} записей</span><textarea aria-label={`Словарь ${label(category)}`} rows="5" value={editor.dictionaries[category].join('\n')} on:input={(event)=>{editor.dictionaries[category]=event.currentTarget.value.split('\n').filter(Boolean);sync();}}/><span class="muted small">Не оставляйте словарь пустым: политика требует хотя бы одну запись.</span></label>{/each}</div></section>
++    <section class="panel"><details><summary>Дополнительные настройки <span class="muted small">Регулярные выражения и JSON</span></summary><p class="hint">Для специалистов. Ошибка в шаблоне может изменить обнаружение данных. Перед публикацией проверьте настройки.</p>{#each editor.regex as rule,i}<label class="dictionary"><strong>{label(rule.entity)}</strong><input aria-label={`Regex ${rule.entity} ${i}`} class="mono" bind:value={rule.pattern} on:input={sync}/></label>{/each}<details class="json-editor"><summary>Редактор JSON</summary><p class="muted small">После ручного редактирования примените JSON к форме. Сервер дополнительно проверит документ при сохранении черновика.</p><textarea aria-label="Policy JSON" class="mono" rows="16" bind:value={document}/><button class="secondary" on:click={applyJSON}>Применить JSON к форме</button></details></details></section>
++    <div class="action-bar"><div><strong>{busy?'Выполняем действие…':dirty?'Изменения ещё не сохранены':state.draft?'Черновик готов к публикации':'Нет новых изменений'}</strong><p class="muted small">Публикация меняет действующую политику для новых проверок.</p></div><div class="button-group"><button class="secondary" disabled={busy} on:click={()=>action('draft')}>Сохранить черновик</button><button class="primary" disabled={busy||!state.draft||dirty} on:click={()=>action('publish')}>Опубликовать черновик</button></div></div>
++   </fieldset>
++   {#if !state.can_edit}<p class="message">Режим аудитора: настройки доступны только для чтения. Сохранение и публикация запрещены.</p>{/if}
++   <section class="panel history"><h2>История изменений</h2><p class="muted">Восстановление публикует выбранную версию вместо текущей. События журнала могут ссылаться на одну и ту же версию.</p>{#each state.history as entry}<div class="history-row border-b"><div><strong>{entry.action==='publish'?'Публикация':entry.action==='draft'?'Сохранение черновика':entry.action}</strong><time>{new Date(entry.at*1000).toLocaleString('ru-RU')}</time><code class="version" title={entry.version}>{entry.version}</code></div><button class="secondary" disabled={busy||!state.can_edit||entry.version===state.active} on:click={()=>restore(entry.version)}>{entry.version===state.active?'Действующая версия':'Восстановить версию'}</button></div>{/each}{#if !state.history.length}<p class="empty">История изменений пока пуста.</p>{/if}</section>
++  {/if}
++ </div>
++</div>
++
++<style>
++ .dlp-page{width:100%;height:100%;overflow-y:auto;background:var(--dlp-bg,#f8fafc);color:var(--dlp-text,#172033)}
++ .dlp-container{max-width:1160px;margin:auto;padding:36px 28px 64px}.page-header,.section-heading,.action-bar,.history-row{display:flex;justify-content:space-between;align-items:center;gap:24px}.page-header{margin-bottom:28px}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.13em;color:#64748b}h1{font-size:30px;font-weight:750;letter-spacing:-.035em;margin:8px 0}h2{font-size:18px;font-weight:650;margin-bottom:8px}.subtitle,.muted{color:var(--dlp-muted,#64748b)}p{line-height:1.6}.small{font-size:12px}.panel{border:1px solid var(--dlp-border,#e2e8f0);border-radius:16px;padding:24px;background:var(--dlp-panel,#fff);margin-bottom:20px}.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.overview .panel{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.overview strong{font-size:15px}.version{display:block;max-width:100%;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.badge{display:inline-flex;padding:5px 10px;border-radius:7px;font-size:11px;font-weight:650;white-space:nowrap}.safe,.mask{background:#e4f5ef;color:#16654d}.block{background:#feecec;color:#a52636}.review{background:#fff3d5;color:#885b07}.allow{background:#eef2f7;color:#475569}.guide{border-left:3px solid #10a683}.guide p+p{margin-top:8px}fieldset{min-width:0}.section-heading{margin-bottom:22px}.search input{width:240px}.legend{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;padding:18px;background:var(--dlp-bg,#f8fafc);border-radius:12px}.legend p{font-size:12px;color:var(--dlp-muted,#64748b);margin-top:8px}.hint{font-size:12px;color:var(--dlp-muted,#64748b);margin:18px 0}.rule-row{display:grid;grid-template-columns:minmax(200px,1fr) minmax(210px,270px) 140px;gap:24px;align-items:center;padding:18px 0;border-top:1px solid var(--dlp-border,#e2e8f0)}.category-name{display:flex;gap:12px;align-items:center}.category-name strong{display:block;font-size:14px}.category-name code{display:block;font-size:10px;color:var(--dlp-muted,#64748b);margin-top:3px}.inactive .category-name{opacity:.55}input[type=checkbox]{width:17px;height:17px;accent-color:#059669;flex-shrink:0}.control{display:flex;flex-direction:column;gap:6px}.control>span{font-size:11px;color:var(--dlp-muted,#64748b)}select,input:not([type=checkbox]),textarea{background:var(--dlp-panel,#fff);color:inherit;border:1px solid var(--dlp-input,#cbd5e1);border-radius:8px;padding:10px 12px;font-size:13px;max-width:100%}select,textarea{width:100%}input:focus,select:focus,textarea:focus,button:focus-visible,summary:focus-visible{outline:2px solid #10b981;outline-offset:3px}.dictionary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:22px}.dictionary{display:flex;flex-direction:column;gap:8px;margin-top:14px}.dictionary strong{font-size:14px}textarea{line-height:1.65;resize:vertical}.mono{font-family:monospace}.dictionary input{width:100%}summary{cursor:pointer;font-size:15px;font-weight:600}summary span{margin-left:12px;font-weight:400}.json-editor{margin-top:24px}.json-editor textarea{margin:12px 0}.action-bar{position:sticky;bottom:12px;z-index:5;padding:18px 22px;margin-bottom:24px;background:var(--dlp-panel,#fff);border:1px solid var(--dlp-border,#e2e8f0);border-radius:14px;box-shadow:0 6px 24px #0000000c}.action-bar strong{font-size:14px}.button-group{display:flex;gap:10px}button{font-size:13px;font-weight:600;padding:10px 15px;border-radius:9px;transition:background .15s}button.primary{background:#047857;color:white}button.primary:hover:not(:disabled){background:#065f46}button.secondary{border:1px solid var(--dlp-input,#cbd5e1);background:var(--dlp-panel,#fff)}button.secondary:hover:not(:disabled){background:var(--dlp-bg,#f8fafc)}button:disabled{opacity:.45;cursor:not-allowed}.history-row{padding:18px 0;border-bottom:1px solid var(--dlp-border,#e2e8f0)}.history-row>div{min-width:0}.history-row strong{font-size:13px}.history-row time{display:inline-block;font-size:12px;color:var(--dlp-muted,#64748b);margin-left:14px}.history-row code{margin-top:8px}.history-row button{flex-shrink:0}.message{padding:16px 20px;border:1px solid var(--dlp-border,#e2e8f0);border-radius:12px;margin-bottom:20px;font-size:14px}.message button{margin-left:12px}.error{background:#fff1f2;color:#9f1239;border-color:#fecdd3}.success{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}.empty{text-align:center;padding:32px;color:var(--dlp-muted,#64748b)}
++ :global(.dark) .dlp-page{--dlp-bg:#11151d;--dlp-panel:#1b212c;--dlp-text:#e5eaf3;--dlp-muted:#a2aec0;--dlp-border:#303b4b;--dlp-input:#465268}
++ @media(max-width:900px){.overview{grid-template-columns:1fr}.overview .panel{margin-bottom:0}.overview{margin-bottom:20px}.page-header{align-items:flex-start;flex-direction:column}.legend{grid-template-columns:repeat(2,minmax(0,1fr))}.rule-row{grid-template-columns:minmax(0,1fr) 125px;gap:14px}.category-name{grid-column:1/-1}.dictionary-grid{grid-template-columns:1fr}.action-bar{position:static;align-items:flex-start;flex-direction:column}.section-heading{align-items:flex-start;flex-direction:column}.search,.search input{width:100%}}
++ @media(max-width:540px){.dlp-container{padding:24px 14px}.panel{padding:18px}h1{font-size:26px}.button-group{width:100%;flex-direction:column}.history-row{align-items:flex-start;flex-direction:column;gap:12px}.history-row time{display:block;margin:6px 0}.legend{grid-template-columns:1fr}summary span{display:block;margin:6px 0}}
++</style>
+-- 
+2.34.1
+
