@@ -9,9 +9,9 @@ from playwright.sync_api import sync_playwright, expect
 
 @pytest.mark.parametrize('case',range(6))
 def test_arbitrary_synthetic_mask(case):
-    rows=json.loads(Path('/artifacts/.dlp-new-synthetic.json').read_text())
+    rows=json.loads(Path(os.getenv('MASK_CASES_FILE','/artifacts/.dlp-new-synthetic.json')).read_text())
     value=rows[case]
-    content=('ИНН: ' if case==1 else 'СНИЛС: ' if case==2 else '')+value
+    content=('ИНН: ' if case==1 else 'СНИЛС: ' if case==2 else '')+value if not os.getenv('MASK_CASES_FILE') else value
     identity=json.loads(Path('/artifacts/.native-staging-identity.json').read_text())
     control=httpx.Client(base_url='http://mock:8000',headers={'Authorization':'Bearer '+os.environ['TEST_KEY']},timeout=15)
     control.post('/test/scenario',json={'scenario':'dlp-debug'}).raise_for_status()
@@ -32,7 +32,7 @@ def test_arbitrary_synthetic_mask(case):
             masked=json.dumps(state,ensure_ascii=False)
             assert '[V2_' in masked and value not in masked
             assert value not in json.dumps(control.get('/test/last').json(),ensure_ascii=False)
-            if case==5:
+            if case==5 and not os.getenv('MASK_CASES_FILE'):
                 for original in rows[:4]:
                     assert original not in masked
                     assert original not in json.dumps(control.get('/test/last').json(),ensure_ascii=False)

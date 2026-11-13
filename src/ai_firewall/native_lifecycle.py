@@ -143,8 +143,8 @@ async def complete_chat(sessions, inspector, user, chat_id, expected_revision,
                 categories = debug.get('categories', [])
                 content = ('Получен запрос: «' + chain[-1]['content'] + '».\n'
                     'Результат DLP: ' + action + '.\n'
-                    'ПДн обнаружены: ' + ('ДА' if action == 'MASK' else 'НЕТ') + '.\n'
-                    'Категории: ' + (', '.join(categories) or 'нет') + '.\n'
+                    + ('ПДн обнаружены: ДА.\n' if action == 'MASK' else 'Детекторы ПДн: совпадений не найдено.\n')
+                    + 'Категории: ' + (', '.join(categories) or 'нет') + '.\n'
                     'Передано модели: ' + ('только замаскированное сообщение; исходные значения — нет.'
                         if action == 'MASK' else 'проверенное сообщение.'))
     except HTTPException:
