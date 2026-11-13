@@ -45,7 +45,16 @@ for i in "${!services[@]}"; do
   else
     # A previous build may have replaced an image tag while the old container ran.
     # Commit its root filesystem; mounted persistent data is deliberately excluded.
-    docker commit "${containers[$i]}" "$target" > "$backup/${services[$i]}-snapshot.log"
+    if ! docker commit "${containers[$i]}" "$target" > "$backup/${services[$i]}-snapshot.log"; then
+      docker export "${containers[$i]}" -o "$backup/${services[$i]}-rootfs.tar"
+      # Imported roots need the original service command (Compose restores env/mounts).
+      case "${services[$i]}" in
+        gateway) command='["python","-m","ai_firewall.services"]' ;;
+        pii) command='["uvicorn","ai_firewall.pii_service:app","--host","0.0.0.0","--port","8000","--no-access-log","--log-level","critical"]' ;;
+        webui) command='["uvicorn","ai_firewall.native_runtime:app","--host","0.0.0.0","--port","8080","--no-access-log"]' ;;
+      esac
+      docker import --change 'ENV PYTHONPATH=/app/src' --change 'WORKDIR /app' --change "CMD $command" "$backup/${services[$i]}-rootfs.tar" "$target"
+    fi
   fi
 done
 # Keep existing auditor configuration; never infer permissions from a new shell env.
